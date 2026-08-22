@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InstaGo Chat</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+
+        input {
+            padding: 10px;
+            margin: 5px 0;
+            width: 90%;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px 0;
+            cursor: pointer;
+        }
+
+        #output {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 15px;
+            min-height: 200px;
+        }
+
+        #status {
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>InstaGo Chat</h1>
+
+    <!-- Username -->
+    <input type="text" id="username" placeholder="Enter username">
+    <button onclick="connect()">Connect</button>
+
+    <p id="status">Not connected</p>
+
+    <hr>
+
+    <!-- Chat -->
+    <input type="text" id="recipient" placeholder="Send to username">
+    <input type="text" id="message" placeholder="Enter message">
+
+    <button onclick="sendMessage()">Send</button>
+
+    <div id="output"></div>
+
+    <script>
+
+        let socket;
+
+        function connect() {
+            const username = document.getElementById("username").value;
+
+            if (!username) {
+                alert("Please enter a username");
+                return;
+            }
+
+            socket = new WebSocket(
+                "ws://localhost:8080/ws?username=" +
+                encodeURIComponent(username)
+            );
+
+            socket.onopen = function() {
+                document.getElementById("status").innerText =
+                    "Connected as " + username;
+            };
+
+            socket.onmessage = function(event) {
+                const output = document.getElementById("output");
+
+                output.innerHTML += "<p>" + event.data + "</p>";
+            };
+
+            socket.onclose = function() {
+                document.getElementById("status").innerText =
+                    "Disconnected";
+            };
+
+            socket.onerror = function(error) {
+                console.log("WebSocket error:", error);
+            };
+        }
+
+        function sendMessage() {
+
+            const recipient =
+                document.getElementById("recipient").value;
+
+            const message =
+                document.getElementById("message").value;
+
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                alert("Connect first!");
+                return;
+            }
+
+            if (!recipient || !message) {
+                alert("Enter recipient and message");
+                return;
+            }
+
+            const data = {
+                to: recipient,
+                message: message
+            };
+
+            socket.send(JSON.stringify(data));
+        }
+
+    </script>
+
+</body>
+</html>
