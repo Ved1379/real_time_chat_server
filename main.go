@@ -10,6 +10,7 @@ import (
 )
 
 type Message struct {
+	Type    string `json:"type"`
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Message string `json:"message"`
@@ -87,29 +88,50 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		ChatMessage.From = client.username
 
-		messages = append(messages, ChatMessage)
+		switch ChatMessage.Type {
 
-		response := []byte(client.username + ":" + ChatMessage.Message)
+		case "message":
+			messages = append(messages,ChatMessage)
 
-		found := false
-		hub.mu.Lock()
-		for recipient := range hub.clients {
-			if recipient.username == ChatMessage.To {
-				found = true
-				recipient.conn.WriteMessage(messageType, response)
+			response := []byte(client.username + ": " + ChatMessage.From)
+
+			found := false
+
+			hub.mu.Lock()
+
+			for recipient := range hub.clients {
+				if recipient.username == ChatMessage.To{
+					found = true
+
+					err := recipient.conn.WriteMessage(
+						messageType,
+						response,
+					)
+
+					if err != nil {
+						fmt.Println("Error sending message:", err)
+					}
+				}
 			}
-		}
 
-		hub.mu.Unlock()
+			hub.mu.Unlock()
 
-		if !found {
-			err := client.conn.WriteMessage(
-				websocket.TextMessage,
-				[]byte("user "+ChatMessage.To+" is not connected"),
-			)
+			if !found {
+				err := client.conn.WriteMessage(
+					websocket.TextMessage,
+					[]byte("User "+ChatMessage.To+" is not connected"),
+				)
+
+				if err != nil {
+					fmt.Println("Error sending notification:", err)
+				}
+			}
+
+		case "history":
+			history := getChatHistory(client.username, ChatMessage.To)
 
 			if err != nil {
-				fmt.Println("Error sending notification:", err)
+				fmt.Println("Error creating history:", err)
 			}
 		}
 	}
@@ -120,9 +142,11 @@ func getChatHistory(username1 string, username2 string) []Message {
 
 	for _, msg := range messages {
 		if (msg.From == username1 && msg.To == username2) ||
-		(msg.From == username2 && msg.To == username1)
+			(msg.From == username2 && msg.To == username1) {
 
-		history = append(history, msg)
+			history = append(history, msg)
+		}
 	}
+	return history
 
 }
