@@ -93,7 +93,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "message":
 			messages = append(messages,ChatMessage)
 
-			response := []byte(client.username + ": " + ChatMessage.From)
+			response := []byte(client.username + ": " + ChatMessage.Message)
 
 			found := false
 
