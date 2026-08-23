@@ -129,9 +129,22 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "history":
 			history := getChatHistory(client.username, ChatMessage.To)
+			historyJSON, err := json.Marshal(history)
 
 			if err != nil {
 				fmt.Println("Error creating history:", err)
+				return
+			}
+
+			err = client.conn.WriteMessage(
+				websocket.TextMessage,
+				historyJSON,
+			)
+
+
+			if err != nil {
+				fmt.Println("Error sending history:", err)
+				return
 			}
 		}
 	}

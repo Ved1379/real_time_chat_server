@@ -21,7 +21,7 @@
 
         button {
             padding: 10px 20px;
-            margin: 5px 0;
+            margin: 5px 5px 5px 0;
             cursor: pointer;
         }
 
@@ -43,7 +43,12 @@
     <h1>InstaGo Chat</h1>
 
     <!-- Username -->
-    <input type="text" id="username" placeholder="Enter username">
+    <input
+        type="text"
+        id="username"
+        placeholder="Enter username"
+    >
+
     <button onclick="connect()">Connect</button>
 
     <p id="status">Not connected</p>
@@ -51,10 +56,21 @@
     <hr>
 
     <!-- Chat -->
-    <input type="text" id="recipient" placeholder="Send to username">
-    <input type="text" id="message" placeholder="Enter message">
+    <input
+        type="text"
+        id="recipient"
+        placeholder="Send to username"
+    >
+
+    <input
+        type="text"
+        id="message"
+        placeholder="Enter message"
+    >
 
     <button onclick="sendMessage()">Send</button>
+
+    <button onclick="getHistory()">Get History</button>
 
     <div id="output"></div>
 
@@ -62,8 +78,12 @@
 
         let socket;
 
+
+        // Connect to WebSocket
         function connect() {
-            const username = document.getElementById("username").value;
+
+            const username =
+                document.getElementById("username").value;
 
             if (!username) {
                 alert("Please enter a username");
@@ -75,27 +95,84 @@
                 encodeURIComponent(username)
             );
 
+
             socket.onopen = function() {
+
                 document.getElementById("status").innerText =
                     "Connected as " + username;
+
             };
 
+
+            // Receive messages from server
             socket.onmessage = function(event) {
-                const output = document.getElementById("output");
 
-                output.innerHTML += "<p>" + event.data + "</p>";
+                const output =
+                    document.getElementById("output");
+
+                try {
+
+                    const data = JSON.parse(event.data);
+
+                    // History received
+                    if (Array.isArray(data)) {
+
+                        data.forEach(msg => {
+
+                            output.innerHTML +=
+                                "<p>" +
+                                msg.from +
+                                ": " +
+                                msg.message +
+                                "</p>";
+
+                        });
+
+                    }
+
+                    // JSON object received
+                    else {
+
+                        output.innerHTML +=
+                            "<p>" +
+                            event.data +
+                            "</p>";
+
+                    }
+
+                }
+
+                // Normal text message
+                catch (error) {
+
+                    output.innerHTML +=
+                        "<p>" +
+                        event.data +
+                        "</p>";
+
+                }
+
             };
+
 
             socket.onclose = function() {
+
                 document.getElementById("status").innerText =
                     "Disconnected";
+
             };
+
 
             socket.onerror = function(error) {
+
                 console.log("WebSocket error:", error);
+
             };
+
         }
 
+
+        // Send normal chat message
         function sendMessage() {
 
             const recipient =
@@ -104,23 +181,72 @@
             const message =
                 document.getElementById("message").value;
 
-            if (!socket || socket.readyState !== WebSocket.OPEN) {
+
+            if (!socket ||
+                socket.readyState !== WebSocket.OPEN) {
+
                 alert("Connect first!");
                 return;
+
             }
+
 
             if (!recipient || !message) {
+
                 alert("Enter recipient and message");
                 return;
+
             }
 
+
             const data = {
+
                 type: "message",
                 to: recipient,
                 message: message
+
             };
 
+
             socket.send(JSON.stringify(data));
+
+        }
+
+
+        // Request chat history
+        function getHistory() {
+
+            const recipient =
+                document.getElementById("recipient").value;
+
+
+            if (!socket ||
+                socket.readyState !== WebSocket.OPEN) {
+
+                alert("Connect first!");
+                return;
+
+            }
+
+
+            if (!recipient) {
+
+                alert("Enter username");
+                return;
+
+            }
+
+
+            const data = {
+
+                type: "history",
+                to: recipient
+
+            };
+
+
+            socket.send(JSON.stringify(data));
+
         }
 
     </script>
