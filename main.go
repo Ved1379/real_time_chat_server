@@ -1,12 +1,16 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type Message struct {
@@ -31,10 +35,25 @@ var hub = Hub{
 }
 
 var messages []Message
+var db*sql.DB
 
 var upgrade = websocket.Upgrader{}
 
 func main() {
+	err := godotenv.Load()
+
+	if err != nil{
+		log.Fatal("Error loading .env file", err)
+	}
+
+	db, err = sql.Open(
+		"postgres",
+		"host=localhost port=5433 user=postgres password=YOUR_PASSWORD dbname=realtime_chat ssmode=disable",
+	)
+
+	err != nil {
+		log.Fatal("Error connecting to database:", err)
+	}
 	http.HandleFunc("/ws", handleWebSocket)
 	http.Handle("/", http.FileServer(http.Dir("./frontend")))
 
@@ -91,7 +110,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch ChatMessage.Type {
 
 		case "message":
-			messages = append(messages,ChatMessage)
+			messages = append(messages, ChatMessage)
 
 			response := []byte(client.username + ": " + ChatMessage.Message)
 
@@ -100,7 +119,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			hub.mu.Lock()
 
 			for recipient := range hub.clients {
-				if recipient.username == ChatMessage.To{
+				if recipient.username == ChatMessage.To {
 					found = true
 
 					err := recipient.conn.WriteMessage(
@@ -140,7 +159,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				websocket.TextMessage,
 				historyJSON,
 			)
-
 
 			if err != nil {
 				fmt.Println("Error sending history:", err)
