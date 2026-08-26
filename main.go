@@ -199,7 +199,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "history":
-			history := getChatHistory(client.username, ChatMessage.To)
+			history, err := getChatHistory(client.username, ChatMessage.To)
 			historyJSON, err := json.Marshal(history)
 
 			if err != nil {
@@ -229,37 +229,37 @@ func getChatHistory(username1, username2 string) ([]Message, error) {
 		ORDER BY created_at ASC
 		`
 
-		rows, err := db.Query(query, username1, username2)
+	rows, err := db.Query(query, username1, username2)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var history []Message
+
+	for rows.Next() {
+
+		var msg Message
+
+		err := rows.Scan(
+			&msg.From,
+			&msg.To,
+			&msg.Message,
+			&msg.CreatedAt,
+		)
 
 		if err != nil {
-			return nil, err 
-		}
-
-		defer rows.Close()
-
-		var history []Message
-
-		for rows.Next() {
-			
-			var msg Message
-
-			err := rows.Scan(
-				&msg.From,
-				&msg.To,
-				&msg.Message,
-			)
-
-
-			if err != nil {
-				return nil, err
-			}
-
-			history = append(history, msg)
-		}
-
-		if err = rows.Err(); err != nil {
 			return nil, err
 		}
 
-		return history, nil
+		history = append(history, msg)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return history, nil
 }
