@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/joho/godotenv"
@@ -18,6 +20,7 @@ type Message struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Message string `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type client struct {
@@ -35,25 +38,60 @@ var hub = Hub{
 }
 
 var messages []Message
-var db*sql.DB
+var db *sql.DB
 
 var upgrade = websocket.Upgrader{}
 
 func main() {
 	err := godotenv.Load()
 
-	if err != nil{
+	if err != nil {
 		log.Fatal("Error loading .env file", err)
 	}
 
-	db, err = sql.Open(
-		"postgres",
-		"host=localhost port=5433 user=postgres password=YOUR_PASSWORD dbname=realtime_chat ssmode=disable",
+	dbHost := os.Getenv("POSTGRES_HOST")
+	dbport := os.Getenv("POSTGRES_PORT")
+	dbUser := os.Getenv("POSTGRES_USER")
+	dbpassword := os.Getenv("POSTGRES_PASSWORD")
+	dbName := os.Getenv("POSTGRES_DB")
+
+	connStr := fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		dbHost,
+		dbport,
+		dbUser,
+		dbpassword,
+		dbName,
 	)
 
-	err != nil {
+	db, err = sql.Open("postgres", connStr)
+
+	if err != nil {
 		log.Fatal("Error connecting to database:", err)
 	}
+
+	err = db.Ping()
+
+	if err != nil {
+		log.Fatal("Error pinging database:", err)
+	}
+
+	createTableQuery := `
+	CREATE TABLE IF NOT EXISTS messages (
+	id SERIAL PRIMARY KEY,
+	from_user TEXT NOT NULL,
+	to_user TEXT NOT NULL,
+	message TEXT NOT NULL,
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`
+
+	_, err =  db.Exec(createTableQuery)
+
+	if err != nil {
+		log.Fatal("Error creating messages table:", err)
+	}
+
+	fmt.Println("Message table ready")
+
 	http.HandleFunc("/ws", handleWebSocket)
 	http.Handle("/", http.FileServer(http.Dir("./frontend")))
 
@@ -105,12 +143,26 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		ChatMessage.From = client.username
-
 		switch ChatMessage.Type {
 
 		case "message":
-			messages = append(messages, ChatMessage)
+
+			ChatMessage.From = client.username
+
+			query := `
+					INSERT INTO messages (from_user, to_user, message)
+					VALUES ($1, $2, $3)
+				`
+
+				_, err = db.Exec(
+				query,
+				ChatMessage.From,
+				ChatMessage.To,
+				ChatMessage.Message,
+			)
+			if err != nil{
+				fmt.Println("Error saving message", err)
+			}
 
 			response := []byte(client.username + ": " + ChatMessage.Message)
 
