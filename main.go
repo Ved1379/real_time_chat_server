@@ -16,10 +16,10 @@ import (
 )
 
 type Message struct {
-	Type    string `json:"type"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Message string `json:"message"`
+	Type      string    `json:"type"`
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	Message   string    `json:"message"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -84,7 +84,7 @@ func main() {
 	message TEXT NOT NULL,
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`
 
-	_, err =  db.Exec(createTableQuery)
+	_, err = db.Exec(createTableQuery)
 
 	if err != nil {
 		log.Fatal("Error creating messages table:", err)
@@ -154,13 +154,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					VALUES ($1, $2, $3)
 				`
 
-				_, err = db.Exec(
+			_, err = db.Exec(
 				query,
 				ChatMessage.From,
 				ChatMessage.To,
 				ChatMessage.Message,
 			)
-			if err != nil{
+			if err != nil {
 				fmt.Println("Error saving message", err)
 			}
 
@@ -220,16 +220,46 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 }
-func getChatHistory(username1 string, username2 string) []Message {
-	var history []Message
+func getChatHistory(username1, username2 string) ([]Message, error) {
 
-	for _, msg := range messages {
-		if (msg.From == username1 && msg.To == username2) ||
-			(msg.From == username2 && msg.To == username1) {
+	query := `SELECT from_user, to_user, message, created_at
+		FROM messages
+		WHERE (from_user = $1 AND to_user = $2)
+		   OR (from_user = $2 AND to_user = $1)
+		ORDER BY created_at ASC
+		`
+
+		rows, err := db.Query(query, username1, username2)
+
+		if err != nil {
+			return nil, err 
+		}
+
+		defer rows.Close()
+
+		var history []Message
+
+		for rows.Next() {
+			
+			var msg Message
+
+			err := rows.Scan(
+				&msg.From,
+				&msg.To,
+				&msg.Message,
+			)
+
+
+			if err != nil {
+				return nil, err
+			}
 
 			history = append(history, msg)
 		}
-	}
-	return history
 
+		if err = rows.Err(); err != nil {
+			return nil, err
+		}
+
+		return history, nil
 }
