@@ -1,5 +1,6 @@
 module realtime-chat
 
+
 go 1.26.5
 
 require (

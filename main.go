@@ -4,15 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"sync"
 	"time"
 
+	"realtime-chat/database"
+
 	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
-	_ "github.com/lib/pq"
 )
 
 type Message struct {
@@ -43,54 +41,10 @@ var db *sql.DB
 var upgrade = websocket.Upgrader{}
 
 func main() {
-	err := godotenv.Load()
 
-	if err != nil {
-		log.Fatal("Error loading .env file", err)
-	}
+	db = database.Connect()
 
-	dbHost := os.Getenv("POSTGRES_HOST")
-	dbport := os.Getenv("POSTGRES_PORT")
-	dbUser := os.Getenv("POSTGRES_USER")
-	dbpassword := os.Getenv("POSTGRES_PASSWORD")
-	dbName := os.Getenv("POSTGRES_DB")
-
-	connStr := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		dbHost,
-		dbport,
-		dbUser,
-		dbpassword,
-		dbName,
-	)
-
-	db, err = sql.Open("postgres", connStr)
-
-	if err != nil {
-		log.Fatal("Error connecting to database:", err)
-	}
-
-	err = db.Ping()
-
-	if err != nil {
-		log.Fatal("Error pinging database:", err)
-	}
-
-	createTableQuery := `
-	CREATE TABLE IF NOT EXISTS messages (
-	id SERIAL PRIMARY KEY,
-	from_user TEXT NOT NULL,
-	to_user TEXT NOT NULL,
-	message TEXT NOT NULL,
-	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`
-
-	_, err = db.Exec(createTableQuery)
-
-	if err != nil {
-		log.Fatal("Error creating messages table:", err)
-	}
-
-	fmt.Println("Message table ready")
+	database.CreateTables(db)
 
 	http.HandleFunc("/ws", handleWebSocket)
 	http.Handle("/", http.FileServer(http.Dir("./frontend")))
