@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -69,7 +70,28 @@ func CreateTables(db *sql.DB) {
 	fmt.Println("Message table ready")
 }
 
-func SaveMessages() {
-
-	
+type Message struct {
+	From      string
+	To        string
+	Message   string
+	CreatedAt time.Time
 }
+
+func SaveMessage(db *sql.DB, fromUser, toUser, message string) error {
+
+	query := `
+		INSERT INTO messages (from_user, to_user, message)
+		VALUES ($1, $2, $3)
+	`
+
+	_, err := db.Exec(
+		query,
+		fromUser,
+		toUser,
+		message,
+	)
+
+	return err
+}
+
+

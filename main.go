@@ -103,20 +103,16 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			ChatMessage.From = client.username
 
-			query := `
-					INSERT INTO messages (from_user, to_user, message)
-					VALUES ($1, $2, $3)
-				`
+		err := database.SaveMessage(
+			db,
+			ChatMessage.From,
+			ChatMessage.To,
+			ChatMessage.Message,
+		)
 
-			_, err = db.Exec(
-				query,
-				ChatMessage.From,
-				ChatMessage.To,
-				ChatMessage.Message,
-			)
-			if err != nil {
-				fmt.Println("Error saving message", err)
-			}
+		if err != nil {
+			fmt.Println("Error saving message:", err)
+		}
 
 			response := []byte(client.username + ": " + ChatMessage.Message)
 
