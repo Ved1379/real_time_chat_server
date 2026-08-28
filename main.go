@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"realtime-chat/database"
+	"realtime-chat/websocket"
 
-	"github.com/gorilla/websocket"
+	gorilla "github.com/gorilla/websocket"
 )
 
 type Message struct {
@@ -21,24 +22,19 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type client struct {
-	conn     *websocket.Conn
-	username string
-}
-
 type Hub struct {
 	mu      sync.Mutex
-	clients map[*client]bool
+	clients map[*websocket.Client]bool
 }
 
 var hub = Hub{
-	clients: make(map[*client]bool),
+	clients: make(map[*websocket.Client]bool),
 }
 
 var messages []Message
 var db *sql.DB
 
-var upgrade = websocket.Upgrader{}
+var upgrade = gorilla.Upgrader{}
 
 func main() {
 
@@ -64,9 +60,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	username := r.URL.Query().Get("username")
 
-	client := &client{
-		conn:     conn,
-		username: username,
+	client := &websocket.Client{
+		Conn:     conn,
+		Username: username,
 	}
 
 	hub.mu.Lock()
@@ -101,30 +97,30 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "message":
 
-			ChatMessage.From = client.username
+			ChatMessage.From = client.Username
 
-		err := database.SaveMessage(
-			db,
-			ChatMessage.From,
-			ChatMessage.To,
-			ChatMessage.Message,
-		)
+			err := database.SaveMessage(
+				db,
+				ChatMessage.From,
+				ChatMessage.To,
+				ChatMessage.Message,
+			)
 
-		if err != nil {
-			fmt.Println("Error saving message:", err)
-		}
+			if err != nil {
+				fmt.Println("Error saving message:", err)
+			}
 
-			response := []byte(client.username + ": " + ChatMessage.Message)
+			response := []byte(client.Username + ": " + ChatMessage.Message)
 
 			found := false
 
 			hub.mu.Lock()
 
 			for recipient := range hub.clients {
-				if recipient.username == ChatMessage.To {
+				if recipient.Username == ChatMessage.To {
 					found = true
 
-					err := recipient.conn.WriteMessage(
+					err := recipient.Conn.WriteMessage(
 						messageType,
 						response,
 					)
@@ -138,8 +134,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			hub.mu.Unlock()
 
 			if !found {
-				err := client.conn.WriteMessage(
-					websocket.TextMessage,
+				err := client.Conn.WriteMessage(
+					gorilla.TextMessage,
 					[]byte("User "+ChatMessage.To+" is not connected"),
 				)
 
@@ -149,7 +145,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "history":
-			history, err := getChatHistory(client.username, ChatMessage.To)
+			history, err := getChatHistory(client.Username, ChatMessage.To)
 			historyJSON, err := json.Marshal(history)
 
 			if err != nil {
@@ -157,8 +153,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			err = client.conn.WriteMessage(
-				websocket.TextMessage,
+			err = client.Conn.WriteMessage(
+				gorilla.TextMessage,
 				historyJSON,
 			)
 

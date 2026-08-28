@@ -93,5 +93,3 @@ func SaveMessage(db *sql.DB, fromUser, toUser, message string) error {
 
 	return err
 }
-
-
