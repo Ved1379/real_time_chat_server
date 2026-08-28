@@ -143,6 +143,12 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "history":
 			history, err := database.GetChatHistory(db, client.Username, ChatMessage.To)
+
+			if err != nil {
+				fmt.Println("Error getting chat history:", err)
+				return
+			}
+			
 			historyJSON, err := json.Marshal(history)
 
 			if err != nil {
@@ -162,47 +168,4 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-}
-func getChatHistory(username1, username2 string) ([]Message, error) {
-
-	query := `SELECT from_user, to_user, message, created_at
-		FROM messages
-		WHERE (from_user = $1 AND to_user = $2)
-		   OR (from_user = $2 AND to_user = $1)
-		ORDER BY created_at ASC
-		`
-
-	rows, err := db.Query(query, username1, username2)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer rows.Close()
-
-	var history []Message
-
-	for rows.Next() {
-
-		var msg Message
-
-		err := rows.Scan(
-			&msg.From,
-			&msg.To,
-			&msg.Message,
-			&msg.CreatedAt,
-		)
-
-		if err != nil {
-			return nil, err
-		}
-
-		history = append(history, msg)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return history, nil
 }

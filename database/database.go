@@ -71,10 +71,10 @@ func CreateTables(db *sql.DB) {
 }
 
 type Message struct {
-	From      string
-	To        string
-	Message   string
-	CreatedAt time.Time
+	From      string 	`json:"from"`
+	To        string	`json:"to"` 
+	Message   string	`json:"message"`
+	CreatedAt time.Time	`json:"created_at"`
 }
 
 func SaveMessage(db *sql.DB, fromUser, toUser, message string) error {
