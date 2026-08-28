@@ -2,13 +2,13 @@ package websocket
 
 import "sync"
 
-type hub struct {
+type Hub struct {
 	Mu sync.Mutex
-	Client map[*Client]bool
+	Clients map[*Client]bool
 }
 
-func Newhub() {
+func NewHub() *Hub 	{
 	return &Hub{
-		Client: make(map[Client]bool),
+		Clients: make(map[*Client]bool),
 	}
 }

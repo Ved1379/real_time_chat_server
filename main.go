@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"realtime-chat/database"
@@ -22,14 +21,12 @@ type Message struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Hub struct {
-	mu      sync.Mutex
-	clients map[*websocket.Client]bool
+type client struct {
+	conn     *gorilla.Conn
+	username string
 }
 
-var hub = Hub{
-	clients: make(map[*websocket.Client]bool),
-}
+var hub = websocket.NewHub()
 
 var messages []Message
 var db *sql.DB
@@ -65,14 +62,14 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Username: username,
 	}
 
-	hub.mu.Lock()
-	hub.clients[client] = true
-	hub.mu.Unlock()
+	hub.Mu.Lock()
+	hub.Clients[client] = true
+	hub.Mu.Unlock()
 
 	defer func() {
-		hub.mu.Lock()
-		delete(hub.clients, client)
-		hub.mu.Unlock()
+		hub.Mu.Lock()
+		delete(hub.Clients, client)
+		hub.Mu.Unlock()
 	}()
 
 	for {
@@ -114,9 +111,9 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			found := false
 
-			hub.mu.Lock()
+			hub.Mu.Lock()
 
-			for recipient := range hub.clients {
+			for recipient := range hub.Clients {
 				if recipient.Username == ChatMessage.To {
 					found = true
 
@@ -131,7 +128,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			hub.mu.Unlock()
+			hub.Mu.Unlock()
 
 			if !found {
 				err := client.Conn.WriteMessage(
