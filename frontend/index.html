@@ -1,255 +1,174 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>InstaGo Chat</title>
 
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            padding: 20px;
-        }
-
-        input {
-            padding: 10px;
-            margin: 5px 0;
-            width: 90%;
-        }
-
-        button {
-            padding: 10px 20px;
-            margin: 5px 5px 5px 0;
-            cursor: pointer;
-        }
-
-        #output {
-            margin-top: 20px;
-            border: 1px solid #ccc;
-            padding: 15px;
-            min-height: 200px;
-        }
-
-        #status {
-            font-weight: bold;
-        }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-    <h1>InstaGo Chat</h1>
+    <div class="app">
 
-    <!-- Username -->
-    <input
-        type="text"
-        id="username"
-        placeholder="Enter username"
-    >
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
 
-    <button onclick="connect()">Connect</button>
+            <div class="logo">
+                Insta<span>Go</span>
+            </div>
 
-    <p id="status">Not connected</p>
 
-    <hr>
+            <!-- YOUR USERNAME -->
+            <div class="profile-card">
 
-    <!-- Chat -->
-    <input
-        type="text"
-        id="recipient"
-        placeholder="Send to username"
-    >
+                <div class="profile-label">
+                    YOU
+                </div>
 
-    <input
-        type="text"
-        id="message"
-        placeholder="Enter message"
-    >
+                <input
+                    type="text"
+                    id="username"
+                    class="username-input"
+                    placeholder="Enter your username..."
+                    autocomplete="off"
+                >
 
-    <button onclick="sendMessage()">Send</button>
+                <div class="connection">
 
-    <button onclick="getHistory()">Get History</button>
+                    <span
+                        id="statusDot"
+                        class="status-dot"
+                    ></span>
 
-    <div id="output"></div>
+                    <span id="status">
+                        Offline
+                    </span>
 
-    <script>
+                </div>
 
-        let socket;
+                <button
+                    id="connectButton"
+                    class="connect-btn"
+                    onclick="connect()"
+                >
+                    Connect
+                </button>
 
+            </div>
 
-        // Connect to WebSocket
-        function connect() {
 
-            const username =
-                document.getElementById("username").value;
+            <!-- RECIPIENT -->
+            <div class="chat-selection">
 
-            if (!username) {
-                alert("Please enter a username");
-                return;
-            }
+                <div class="section-title">
+                    CHAT WITH
+                </div>
 
-            socket = new WebSocket(
-                "ws://localhost:8080/ws?username=" +
-                encodeURIComponent(username)
-            );
+                <input
+                    type="text"
+                    id="recipient"
+                    class="recipient-input"
+                    placeholder="Enter username..."
+                    autocomplete="off"
+                    onkeydown="handleRecipient(event)"
+                >
 
+                <p class="recipient-help">
+                    Press Enter to open the chat
+                </p>
 
-            socket.onopen = function() {
+            </div>
 
-                document.getElementById("status").innerText =
-                    "Connected as " + username;
+        </aside>
 
-            };
 
+        <!-- CHAT -->
+        <main class="chat">
 
-            // Receive messages from server
-            socket.onmessage = function(event) {
 
-                const output =
-                    document.getElementById("output");
+            <!-- CHAT HEADER -->
+            <header class="chat-header">
 
-                try {
+                <div class="chat-user">
 
-                    const data = JSON.parse(event.data);
+                    <h2 id="chatTitle">
+                        Select a user
+                    </h2>
 
-                    // History received
-                    if (Array.isArray(data)) {
+                    <p id="chatSubtitle">
+                        Enter a username to start chatting
+                    </p>
 
-                        data.forEach(msg => {
+                </div>
 
-                            output.innerHTML +=
-                                "<p>" +
-                                msg.from +
-                                ": " +
-                                msg.message +
-                                "</p>";
 
-                        });
+                <div
+                    id="connectionStatus"
+                    class="connection-status"
+                >
+                    Offline
+                </div>
 
-                    }
+            </header>
 
-                    // JSON object received
-                    else {
 
-                        output.innerHTML +=
-                            "<p>" +
-                            event.data +
-                            "</p>";
+            <!-- MESSAGES -->
+            <section
+                id="output"
+                class="messages"
+            >
 
-                    }
+                <div class="welcome">
 
-                }
+                    <div class="welcome-icon">
+                        💬
+                    </div>
 
-                // Normal text message
-                catch (error) {
+                    <h2>
+                        Welcome to InstaGo
+                    </h2>
 
-                    output.innerHTML +=
-                        "<p>" +
-                        event.data +
-                        "</p>";
+                    <p>
+                        Connect with a user and start chatting.
+                    </p>
 
-                }
+                </div>
 
-            };
+            </section>
 
 
-            socket.onclose = function() {
+            <!-- MESSAGE INPUT -->
+            <div class="input-area">
 
-                document.getElementById("status").innerText =
-                    "Disconnected";
+                <input
+                    type="text"
+                    id="message"
+                    placeholder="Write a message..."
+                    autocomplete="off"
+                    onkeydown="handleEnter(event)"
+                >
 
-            };
+                <button
+                    class="send-btn"
+                    onclick="sendMessage()"
+                    aria-label="Send message"
+                >
+                    ➤
+                </button>
 
+            </div>
 
-            socket.onerror = function(error) {
+        </main>
 
-                console.log("WebSocket error:", error);
+    </div>
 
-            };
 
-        }
-
-
-        // Send normal chat message
-        function sendMessage() {
-
-            const recipient =
-                document.getElementById("recipient").value;
-
-            const message =
-                document.getElementById("message").value;
-
-
-            if (!socket ||
-                socket.readyState !== WebSocket.OPEN) {
-
-                alert("Connect first!");
-                return;
-
-            }
-
-
-            if (!recipient || !message) {
-
-                alert("Enter recipient and message");
-                return;
-
-            }
-
-
-            const data = {
-
-                type: "message",
-                to: recipient,
-                message: message
-
-            };
-
-
-            socket.send(JSON.stringify(data));
-
-        }
-
-
-        // Request chat history
-        function getHistory() {
-
-            const recipient =
-                document.getElementById("recipient").value;
-
-
-            if (!socket ||
-                socket.readyState !== WebSocket.OPEN) {
-
-                alert("Connect first!");
-                return;
-
-            }
-
-
-            if (!recipient) {
-
-                alert("Enter username");
-                return;
-
-            }
-
-
-            const data = {
-
-                type: "history",
-                to: recipient
-
-            };
-
-
-            socket.send(JSON.stringify(data));
-
-        }
-
-    </script>
+    <script src="script.js"></script>
 
 </body>
+
 </html>

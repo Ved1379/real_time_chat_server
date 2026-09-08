@@ -9,6 +9,7 @@ import (
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func Connect() *sql.DB {
@@ -54,6 +55,15 @@ func Connect() *sql.DB {
 func CreateTables(db *sql.DB) {
 
 	createTableQuery := `
+
+	CREATE TABLE IF NOT EXISTS users (
+	id SERIAL PRIMARY KEY,
+	from_user TEXT NOT NULL,
+	to_user TEXT NOT NULL,
+	message TEXT NOT NULL,
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	
 	CREATE TABLE IF NOT EXISTS messages (
 	id SERIAL PRIMARY KEY,
 	from_user TEXT NOT NULL,
@@ -71,10 +81,10 @@ func CreateTables(db *sql.DB) {
 }
 
 type Message struct {
-	From      string 	`json:"from"`
-	To        string	`json:"to"` 
-	Message   string	`json:"message"`
-	CreatedAt time.Time	`json:"created_at"`
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func SaveMessage(db *sql.DB, fromUser, toUser, message string) error {
@@ -89,6 +99,31 @@ func SaveMessage(db *sql.DB, fromUser, toUser, message string) error {
 		fromUser,
 		toUser,
 		message,
+	)
+
+	return err
+}
+
+func RegisterUser(db *sql.DB, username, password string) error {
+
+	hashedPassword, err := bcrypt.GenerateFromPassword(
+		[]byte(password),
+		bcrypt.DefaultCost,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	query := `
+		INSERT INTO users (username, password)
+		VALUES ($1, $2)
+	`
+
+	_, err = db.Exec(
+		query,
+		username,
+		string(hashedPassword),
 	)
 
 	return err

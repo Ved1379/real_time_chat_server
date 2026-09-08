@@ -148,7 +148,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("Error getting chat history:", err)
 				return
 			}
-			
+
 			historyJSON, err := json.Marshal(history)
 
 			if err != nil {
