@@ -57,12 +57,11 @@ func CreateTables(db *sql.DB) {
 	createTableQuery := `
 
 	CREATE TABLE IF NOT EXISTS users (
-	id SERIAL PRIMARY KEY,
-	from_user TEXT NOT NULL,
-	to_user TEXT NOT NULL,
-	message TEXT NOT NULL,
-	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 	
 	CREATE TABLE IF NOT EXISTS messages (
 	id SERIAL PRIMARY KEY,

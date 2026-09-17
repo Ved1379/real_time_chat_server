@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"realtime-chat/authentication"
 	"realtime-chat/database"
 	"realtime-chat/websocket"
 
@@ -40,6 +41,7 @@ func main() {
 	database.CreateTables(db)
 
 	http.HandleFunc("/ws", handleWebSocket)
+	http.Handle("/register", authentication.RegisterHandler(db))
 	http.Handle("/", http.FileServer(http.Dir("./frontend")))
 
 	fmt.Println("Server is running on port 8080")
