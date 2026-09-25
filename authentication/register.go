@@ -8,13 +8,13 @@ import (
 	"realtime-chat/database"
 )
 
-var user struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
 func RegisterHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
+		var user struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
 
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

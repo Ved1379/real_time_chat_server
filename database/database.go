@@ -76,7 +76,7 @@ func CreateTables(db *sql.DB) {
 		log.Fatal("Error creating messages table:", err)
 	}
 
-	fmt.Println("Message table ready")
+	fmt.Println("Tables ready")
 }
 
 type Message struct {
