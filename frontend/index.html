@@ -7,6 +7,13 @@
     <meta name="description" content="InstaGo is a blazing-fast, reactive real-time chat application powered by Go WebSockets.">
     <title>InstaGo • Realtime Messenger</title>
 
+    <script>
+        // STEP 3: Chat requires an authenticated session (Step 1: Register -> Step 2: Login -> Step 3: Chat)
+        if (!localStorage.getItem("token") || !localStorage.getItem("instaGo_username")) {
+            window.location.replace("register.html");
+        }
+    </script>
+
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -28,13 +35,13 @@
                 </a>
 
                 <div class="sidebar-actions">
-                    <a href="login.html" id="authLink" class="icon-btn" title="Account / Login">
-                        👤
-                    </a>
+                    <button class="icon-btn" onclick="logout()" title="Sign Out">
+                        🚪
+                    </button>
                 </div>
             </header>
 
-            <!-- PROFILE / CONNECTION CARD -->
+            <!-- AUTHENTICATED USER PROFILE CARD -->
             <section class="profile-section">
                 <div class="profile-card">
                     <div id="myAvatar" class="user-avatar status-indicator">
@@ -43,7 +50,7 @@
 
                     <div class="profile-details">
                         <div id="myUsername" class="profile-name">
-                            Guest
+                            Connecting...
                         </div>
 
                         <div class="profile-status">
@@ -52,31 +59,10 @@
                         </div>
                     </div>
 
-                    <button id="toggleDrawerBtn" class="icon-btn" onclick="toggleUserDrawer()" title="Connection settings">
-                        ⚙️
+                    <button id="logoutBtn" class="logout-btn" onclick="logout()" title="Sign Out">
+                        <span>Sign Out</span>
+                        <span>🚪</span>
                     </button>
-                </div>
-
-                <!-- COLLAPSIBLE CONNECT FORM -->
-                <div id="userConnectDrawer" class="user-connect-drawer">
-                    <div class="input-with-button">
-                        <input
-                            type="text"
-                            id="username"
-                            class="custom-input"
-                            placeholder="Your username..."
-                            autocomplete="off"
-                            maxlength="24"
-                        >
-
-                        <button
-                            id="connectButton"
-                            class="btn-primary"
-                            onclick="toggleConnect()"
-                        >
-                            Connect
-                        </button>
-                    </div>
                 </div>
             </section>
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"realtime-chat/database"
+	"strings"
 )
 
 func RegisterHandler(db *sql.DB) http.HandlerFunc {
@@ -28,6 +29,7 @@ func RegisterHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		user.Username = strings.TrimSpace(user.Username)
 		if user.Username == "" || user.Password == "" {
 			http.Error(w, "Username and password required", http.StatusBadRequest)
 			return
@@ -35,7 +37,11 @@ func RegisterHandler(db *sql.DB) http.HandlerFunc {
 
 		err = database.RegisterUser(db, user.Username, user.Password)
 		if err != nil {
-			http.Error(w, "could not register user", http.StatusInternalServerError)
+			if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+				http.Error(w, "Username already exists. Please choose another username or sign in.", http.StatusConflict)
+				return
+			}
+			http.Error(w, "Could not register user", http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"realtime-chat/database"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -26,6 +27,7 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
 			return
 		}
+		user.Username = strings.TrimSpace(user.Username)
 		if user.Username == "" || user.Password == "" {
 			http.Error(w, "Username and Password are required", http.StatusBadRequest)
 			return
@@ -46,7 +48,7 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			[]byte(user.Password),
 		)
 		if err != nil {
-			http.Error(w, "Inavlid username or password", http.StatusUnauthorized)
+			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 			return
 		}
 		token, err := GenerateToken(dbUsername)

@@ -182,7 +182,8 @@ function escapeHtml(str) {
 function getWebSocketUrl(username) {
     const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
     const host = window.location.host || "localhost:8080";
-    return `${protocol}${host}/ws?username=${encodeURIComponent(username)}`;
+    const token = localStorage.getItem("token") || "";
+    return `${protocol}${host}/ws?username=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`;
 }
 
 function setConnectionStatus(status) {
@@ -194,49 +195,53 @@ function setConnectionStatus(status) {
     const headerStatus = document.getElementById("connectionStatus");
     const myAvatar = document.getElementById("myAvatar");
 
-    if (!statusDot || !statusText || !connectButton || !headerStatus) return;
+    if (!statusDot || !statusText || !headerStatus) return;
 
     statusDot.className = "live-dot";
-    myAvatar.className = "user-avatar status-indicator";
+    if (myAvatar) myAvatar.className = "user-avatar status-indicator";
     headerStatus.className = "header-status-badge";
 
     if (status === "connected") {
         statusDot.classList.add("online");
-        myAvatar.classList.add("online");
+        if (myAvatar) myAvatar.classList.add("online");
         headerStatus.classList.add("online");
         statusText.innerText = "Online";
         headerStatus.innerText = "Connected";
-        connectButton.innerText = "Disconnect";
-        connectButton.className = "btn-secondary";
+        if (connectButton) {
+            connectButton.innerText = "Disconnect";
+            connectButton.className = "btn-secondary";
+        }
         state.reconnectAttempts = 0;
     } else if (status === "connecting" || status === "reconnecting") {
         statusDot.classList.add("connecting");
-        myAvatar.classList.add("connecting");
+        if (myAvatar) myAvatar.classList.add("connecting");
         headerStatus.classList.add("connecting");
         statusText.innerText = status === "connecting" ? "Connecting..." : "Reconnecting...";
         headerStatus.innerText = statusText.innerText;
-        connectButton.innerText = "Connecting...";
-        connectButton.className = "btn-secondary";
+        if (connectButton) {
+            connectButton.innerText = "Connecting...";
+            connectButton.className = "btn-secondary";
+        }
     } else {
         statusText.innerText = "Offline";
         headerStatus.innerText = "Offline";
-        connectButton.innerText = "Connect";
-        connectButton.className = "btn-primary";
+        if (connectButton) {
+            connectButton.innerText = "Connect";
+            connectButton.className = "btn-primary";
+        }
     }
 }
 
 function connect() {
-    const input = document.getElementById("username");
-    const username = (input ? input.value : state.currentUser).trim();
+    const token = localStorage.getItem("token");
+    const username = (state.currentUser || localStorage.getItem("instaGo_username") || "").trim();
 
-    if (!username) {
-        showToast("Please enter a username to connect", "warning");
-        if (input) input.focus();
+    if (!username || !token) {
+        window.location.replace("register.html");
         return;
     }
 
     state.currentUser = username;
-    localStorage.setItem("instaGo_username", username);
     updateProfileUI();
 
     if (state.socket && (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)) {
@@ -261,8 +266,9 @@ function connect() {
         showToast(`Connected as ${username}`, "success");
         playSound("notify");
 
-        // Hide connect drawer if open
-        toggleUserDrawer(false);
+        if (typeof toggleUserDrawer === "function") {
+            toggleUserDrawer(false);
+        }
 
         // If there's an active recipient, request chat history
         if (state.activeRecipient) {
@@ -303,6 +309,23 @@ function disconnect() {
     }
     setConnectionStatus("disconnected");
     showToast("Disconnected from chat server", "info");
+}
+
+function logout() {
+    if (confirm("Are you sure you want to sign out?")) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectAttempts = 99; // prevent auto-reconnect
+        if (state.socket) {
+            state.socket.close();
+        }
+        localStorage.removeItem("token");
+        localStorage.removeItem("instaGo_username");
+        localStorage.removeItem("instaGo_activeRecipient");
+        showToast("Signed out successfully", "info");
+        setTimeout(() => {
+            window.location.href = "login.html";
+        }, 300);
+    }
 }
 
 function toggleConnect() {
@@ -1001,17 +1024,13 @@ function handleSearchMessages(event) {
 function updateProfileUI() {
     const nameEl = document.getElementById("myUsername");
     const avatarEl = document.getElementById("myAvatar");
-    const input = document.getElementById("username");
 
     if (nameEl) {
-        nameEl.innerText = state.currentUser || "Guest";
+        nameEl.innerText = state.currentUser ? `@${state.currentUser}` : "Guest";
     }
     if (avatarEl) {
         avatarEl.innerText = getInitials(state.currentUser);
         avatarEl.style.background = getAvatarGradient(state.currentUser);
-    }
-    if (input && state.currentUser) {
-        input.value = state.currentUser;
     }
 }
 
@@ -1039,7 +1058,18 @@ function updateHeaderUI() {
 // INITIALIZATION
 // ==========================================================================
 document.addEventListener("DOMContentLoaded", () => {
-    // Populate username from localStorage or default
+    // 1. Auth Guard check: Ensure user is registered & logged in
+    const token = localStorage.getItem("token");
+    const username = localStorage.getItem("instaGo_username");
+
+    if (!token || !username) {
+        window.location.replace("register.html");
+        return;
+    }
+
+    state.currentUser = username;
+
+    // 2. Initialize UI
     updateProfileUI();
     updateHeaderUI();
     renderContactsList();
@@ -1052,12 +1082,8 @@ document.addEventListener("DOMContentLoaded", () => {
         soundBtn.innerText = state.soundEnabled ? "🔊" : "🔇";
     }
 
-    // Auto-connect if username is available
-    if (state.currentUser) {
-        connect();
-    } else {
-        toggleUserDrawer(true);
-    }
+    // Automatically connect with authenticated session
+    connect();
 
     // Select active recipient if stored
     if (state.activeRecipient) {

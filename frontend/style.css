@@ -319,6 +319,34 @@ input, textarea {
     50% { opacity: 0.5; transform: scale(1.2); }
 }
 
+.logout-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: rgba(244, 63, 94, 0.12);
+    border: 1px solid rgba(244, 63, 94, 0.25);
+    color: #fb7185;
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    font-weight: 600;
+    transition: all var(--trans-fast);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.logout-btn:hover {
+    background: rgba(244, 63, 94, 0.22);
+    border-color: rgba(244, 63, 94, 0.45);
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(244, 63, 94, 0.25);
+}
+
+.logout-btn:active {
+    transform: translateY(0);
+}
+
 /* User Connection Form Drawer (when editing/disconnected) */
 .user-connect-drawer {
     margin-top: 12px;

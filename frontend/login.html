@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InstaGo • Sign In</title>
+    <title>InstaGo • Step 2: Login</title>
     <link rel="stylesheet" href="login.css">
 </head>
 
@@ -13,37 +13,60 @@
 
         <div class="login-card">
 
+            <!-- ONBOARDING FLOW TIMELINE -->
+            <div class="flow-steps">
+                <span class="flow-step completed">✓ 1. Register</span>
+                <span class="step-arrow">➔</span>
+                <span class="flow-step active">2. Login</span>
+                <span class="step-arrow">➔</span>
+                <span class="flow-step">3. Chat</span>
+            </div>
+
             <div class="brand-badge">💬</div>
             <h1>Insta<span>Go</span></h1>
-            <p class="subtitle">Sign in to your chat workspace</p>
+            <p class="subtitle">Step 2: Sign in to unlock your chat workspace</p>
+
+            <!-- Friendly Welcome Banner when arriving from registration -->
+            <div id="welcomeBanner" class="auth-banner success"></div>
+
+            <!-- Existing Session Notice -->
+            <div id="sessionNotice" class="session-info"></div>
 
             <form id="loginForm">
 
-                <input
-                    type="text"
-                    id="username"
-                    placeholder="Username"
-                    autocomplete="username"
-                    required
-                >
+                <div class="input-group">
+                    <label for="username">Username</label>
+                    <input
+                        type="text"
+                        id="username"
+                        placeholder="Your username"
+                        autocomplete="username"
+                        required
+                    >
+                </div>
 
-                <input
-                    type="password"
-                    id="password"
-                    placeholder="Password"
-                    autocomplete="current-password"
-                    required
-                >
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input
+                        type="password"
+                        id="password"
+                        placeholder="Your account password"
+                        autocomplete="current-password"
+                        required
+                    >
+                </div>
 
-                <button type="submit">Sign In</button>
+                <button type="submit" id="submitBtn">
+                    <span>Sign In & Launch Chat</span>
+                    <span>→</span>
+                </button>
 
             </form>
 
             <p id="message"></p>
 
             <div class="auth-footer">
-                <div>Don't have an account? <a href="register.html">Create one</a></div>
-                <div><a href="/">← Return to Chat</a></div>
+                <div>New here? <a href="register.html">← Start with Registration</a></div>
             </div>
 
         </div>

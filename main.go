@@ -32,7 +32,11 @@ var hub = websocket.NewHub()
 var messages []Message
 var db *sql.DB
 
-var upgrade = gorilla.Upgrader{}
+var upgrade = gorilla.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 func main() {
 
@@ -51,14 +55,25 @@ func main() {
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrade.Upgrade(w, r, nil)
+	username := r.URL.Query().Get("username")
+	tokenString := r.URL.Query().Get("token")
+	if tokenString != "" {
+		claims, err := authentication.ValidateToken(tokenString)
+		if err == nil && claims.Username != "" {
+			username = claims.Username
+		}
+	}
 
+	if username == "" {
+		http.Error(w, "Unauthorized: username or token required", http.StatusUnauthorized)
+		return
+	}
+
+	conn, err := upgrade.Upgrade(w, r, nil)
 	if err != nil {
 		http.Error(w, "Could not upgrade connection", http.StatusInternalServerError)
 		return
 	}
-
-	username := r.URL.Query().Get("username")
 
 	client := &websocket.Client{
 		Conn:     conn,
