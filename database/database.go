@@ -129,16 +129,16 @@ func RegisterUser(db *sql.DB, username, password string) error {
 }
 
 func GetUserByUsername(db *sql.DB, username string) (string, string, error) {
-		query := `SELECT username, password
+	query := `SELECT username, password
 				 FROM users
 				 WHERE username = $1`
-		row := db.QueryRow(query, username)
-		
-		var dbUsername string
-		var hashedPassword string
+	row := db.QueryRow(query, username)
+
+	var dbUsername string
+	var hashedPassword string
 	err := row.Scan(&dbUsername, &hashedPassword)
 
-	if err != nil{
+	if err != nil {
 		return "", "", err
 	}
 	return dbUsername, hashedPassword, nil

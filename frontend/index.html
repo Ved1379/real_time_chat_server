@@ -4,8 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>InstaGo Chat</title>
+    <meta name="description" content="InstaGo is a blazing-fast, reactive real-time chat application powered by Go WebSockets.">
+    <title>InstaGo • Realtime Messenger</title>
 
     <link rel="stylesheet" href="style.css">
 </head>
@@ -14,151 +14,271 @@
 
     <div class="app">
 
+        <!-- MOBILE SIDEBAR OVERLAY -->
+        <div id="sidebarOverlay" class="sidebar-overlay" onclick="toggleMobileSidebar(false)"></div>
+
         <!-- SIDEBAR -->
-        <aside class="sidebar">
+        <aside id="sidebar" class="sidebar">
 
-            <div class="logo">
-                Insta<span>Go</span>
-            </div>
+            <!-- SIDEBAR HEADER -->
+            <header class="sidebar-header">
+                <a href="/" class="logo-container">
+                    <div class="logo-badge">💬</div>
+                    <div class="logo-text">Insta<span>Go</span></div>
+                </a>
 
+                <div class="sidebar-actions">
+                    <a href="login.html" id="authLink" class="icon-btn" title="Account / Login">
+                        👤
+                    </a>
+                </div>
+            </header>
 
-            <!-- YOUR USERNAME -->
-            <div class="profile-card">
+            <!-- PROFILE / CONNECTION CARD -->
+            <section class="profile-section">
+                <div class="profile-card">
+                    <div id="myAvatar" class="user-avatar status-indicator">
+                        ?
+                    </div>
 
-                <div class="profile-label">
-                    YOU
+                    <div class="profile-details">
+                        <div id="myUsername" class="profile-name">
+                            Guest
+                        </div>
+
+                        <div class="profile-status">
+                            <span id="myStatusDot" class="live-dot"></span>
+                            <span id="myStatusText">Offline</span>
+                        </div>
+                    </div>
+
+                    <button id="toggleDrawerBtn" class="icon-btn" onclick="toggleUserDrawer()" title="Connection settings">
+                        ⚙️
+                    </button>
                 </div>
 
-                <input
-                    type="text"
-                    id="username"
-                    class="username-input"
-                    placeholder="Enter your username..."
-                    autocomplete="off"
-                >
+                <!-- COLLAPSIBLE CONNECT FORM -->
+                <div id="userConnectDrawer" class="user-connect-drawer">
+                    <div class="input-with-button">
+                        <input
+                            type="text"
+                            id="username"
+                            class="custom-input"
+                            placeholder="Your username..."
+                            autocomplete="off"
+                            maxlength="24"
+                        >
 
-                <div class="connection">
-
-                    <span
-                        id="statusDot"
-                        class="status-dot"
-                    ></span>
-
-                    <span id="status">
-                        Offline
-                    </span>
-
+                        <button
+                            id="connectButton"
+                            class="btn-primary"
+                            onclick="toggleConnect()"
+                        >
+                            Connect
+                        </button>
+                    </div>
                 </div>
+            </section>
 
-                <button
-                    id="connectButton"
-                    class="connect-btn"
-                    onclick="connect()"
-                >
-                    Connect
-                </button>
-
+            <!-- SEARCH CONTACTS -->
+            <div class="sidebar-search-box">
+                <div class="search-input-wrapper">
+                    <span class="search-icon">🔍</span>
+                    <input
+                        type="text"
+                        id="searchContactsInput"
+                        class="search-input"
+                        placeholder="Search chats..."
+                        autocomplete="off"
+                        oninput="handleSearchContacts(event)"
+                    >
+                </div>
             </div>
 
-
-            <!-- RECIPIENT -->
-            <div class="chat-selection">
-
-                <div class="section-title">
-                    CHAT WITH
-                </div>
-
-                <input
-                    type="text"
-                    id="recipient"
-                    class="recipient-input"
-                    placeholder="Enter username..."
-                    autocomplete="off"
-                    onkeydown="handleRecipient(event)"
-                >
-
-                <p class="recipient-help">
-                    Press Enter to open the chat
-                </p>
-
+            <!-- CONTACTS SECTION LABEL -->
+            <div class="section-label">
+                <span>Recent Conversations</span>
+                <span id="contactsCount" class="section-label-count">0</span>
             </div>
+
+            <!-- CONVERSATIONS LIST -->
+            <div id="conversationList" class="conversation-list" role="list">
+                <!-- Rendered dynamically by script.js -->
+            </div>
+
+            <!-- SIDEBAR FOOTER (START NEW CHAT) -->
+            <footer class="sidebar-footer">
+                <form class="new-chat-form" onsubmit="handleStartChat(event)">
+                    <input
+                        type="text"
+                        id="recipient"
+                        class="new-chat-input"
+                        placeholder="Chat with username..."
+                        autocomplete="off"
+                        required
+                    >
+
+                    <button type="submit" class="btn-primary" title="Start conversation">
+                        +
+                    </button>
+                </form>
+            </footer>
 
         </aside>
 
 
-        <!-- CHAT -->
-        <main class="chat">
-
+        <!-- MAIN CHAT AREA -->
+        <main class="chat-main">
 
             <!-- CHAT HEADER -->
             <header class="chat-header">
 
-                <div class="chat-user">
+                <div class="chat-header-left">
+                    <button class="mobile-menu-btn" onclick="toggleMobileSidebar(true)" aria-label="Open conversation menu">
+                        ☰
+                    </button>
 
-                    <h2 id="chatTitle">
-                        Select a user
-                    </h2>
+                    <div class="chat-user-meta">
+                        <div id="activeAvatar" class="active-user-avatar">
+                            💬
+                        </div>
 
-                    <p id="chatSubtitle">
-                        Enter a username to start chatting
-                    </p>
+                        <div class="chat-user-headings">
+                            <h1 id="chatTitle" class="chat-user-name">
+                                Welcome to InstaGo
+                            </h1>
 
+                            <p id="chatSubtitle" class="chat-user-status">
+                                Connect and choose a conversation to start messaging
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
+                <div class="chat-header-actions">
+                    <div id="connectionStatus" class="header-status-badge">
+                        Offline
+                    </div>
 
-                <div
-                    id="connectionStatus"
-                    class="connection-status"
-                >
-                    Offline
+                    <button id="searchChatToggleBtn" class="icon-btn" onclick="toggleChatSearch()" title="Search in chat">
+                        🔍
+                    </button>
+
+                    <button id="soundToggleBtn" class="icon-btn" onclick="toggleSound()" title="Sound Effects (On)">
+                        🔊
+                    </button>
+
+                    <button id="refreshHistoryBtn" class="icon-btn" onclick="refreshHistory()" title="Reload history">
+                        ↻
+                    </button>
                 </div>
 
             </header>
 
+            <!-- IN-CHAT SEARCH DRAWER -->
+            <div id="chatSearchDrawer" class="chat-search-drawer">
+                <input
+                    type="text"
+                    id="searchMessagesInput"
+                    class="custom-input"
+                    placeholder="Search messages in this conversation..."
+                    oninput="handleSearchMessages(event)"
+                >
+                <button class="btn-secondary" onclick="toggleChatSearch(false)">Done</button>
+            </div>
 
-            <!-- MESSAGES -->
-            <section
-                id="output"
-                class="messages"
-            >
+            <!-- MESSAGES VIEWPORT -->
+            <section id="output" class="messages-viewport" role="log" aria-live="polite">
 
-                <div class="welcome">
-
-                    <div class="welcome-icon">
-                        💬
-                    </div>
-
-                    <h2>
-                        Welcome to InstaGo
-                    </h2>
-
-                    <p>
-                        Connect with a user and start chatting.
+                <div class="chat-welcome">
+                    <div class="welcome-badge">🚀</div>
+                    <h2 class="welcome-title">Instant Real-Time Chat</h2>
+                    <p class="welcome-desc">
+                        Connect with your friends, team members, or collaborate with anyone in real-time with sub-millisecond response.
                     </p>
-
+                    <div class="welcome-suggestions">
+                        <span class="suggestion-chip" onclick="quickSelectUser('alice')">💬 Chat with Alice</span>
+                        <span class="suggestion-chip" onclick="quickSelectUser('bob')">💬 Chat with Bob</span>
+                        <span class="suggestion-chip" onclick="quickSelectUser('charlie')">💬 Chat with Charlie</span>
+                    </div>
                 </div>
 
             </section>
 
+            <!-- SCROLL TO BOTTOM BUTTON -->
+            <button
+                id="scrollBottomBtn"
+                class="scroll-bottom-btn"
+                onclick="scrollToBottom(true)"
+                aria-label="Scroll to bottom"
+            >
+                ↓
+                <span id="newMsgBadge" class="scroll-badge" style="display: none;">1</span>
+            </button>
 
-            <!-- MESSAGE INPUT -->
-            <div class="input-area">
 
-                <input
-                    type="text"
-                    id="message"
-                    placeholder="Write a message..."
-                    autocomplete="off"
-                    onkeydown="handleEnter(event)"
-                >
+            <!-- CHAT INPUT AREA -->
+            <div class="chat-input-area">
 
-                <button
-                    class="send-btn"
-                    onclick="sendMessage()"
-                    aria-label="Send message"
-                >
-                    ➤
-                </button>
+                <!-- Quick Reaction Chips -->
+                <div class="quick-reaction-bar">
+                    <span class="quick-reaction-label">Quick reacts:</span>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('👋')">👋</button>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('👍')">👍</button>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('❤️')">❤️</button>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('🔥')">🔥</button>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('😂')">😂</button>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('🎉')">🎉</button>
+                    <button class="quick-react-pill" onclick="sendQuickReaction('🚀')">🚀</button>
+                </div>
+
+                <!-- Input Box -->
+                <div class="input-form-box">
+                    <textarea
+                        id="message"
+                        class="chat-textarea"
+                        placeholder="Write a message..."
+                        rows="1"
+                        autocomplete="off"
+                        onkeydown="handleTextareaKeydown(event)"
+                        oninput="handleTextareaInput(event)"
+                    ></textarea>
+
+                    <div class="input-actions-right">
+                        <button
+                            id="emojiTriggerBtn"
+                            class="emoji-trigger-btn"
+                            onclick="toggleEmojiPicker()"
+                            title="Insert Emoji"
+                            type="button"
+                        >
+                            😊
+                        </button>
+
+                        <button
+                            id="sendBtn"
+                            class="send-action-btn"
+                            onclick="sendMessage()"
+                            aria-label="Send message"
+                            type="button"
+                        >
+                            ➤
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Helper Hint Row -->
+                <div class="input-hint-row">
+                    <span>Press <strong>Enter</strong> to send • <strong>Shift + Enter</strong> for new line</span>
+                    <span id="charCounter">0 / 2000</span>
+                </div>
+
+                <!-- EMOJI POPOVER -->
+                <div id="emojiPopover" class="emoji-popover">
+                    <div class="emoji-grid" id="emojiGrid">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
 
             </div>
 
@@ -166,6 +286,8 @@
 
     </div>
 
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="toastContainer" class="toast-container" aria-live="assertive"></div>
 
     <script src="script.js"></script>
 

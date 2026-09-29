@@ -3,7 +3,12 @@ package authentication
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"realtime-chat/database"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func LoginHandler(db *sql.DB) http.HandlerFunc {
@@ -25,6 +30,32 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Username and Password are required", http.StatusBadRequest)
 			return
 		}
+		dbUsername, hashedPassword, err := database.GetUserByUsername(db, user.Username)
 
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+				return
+			}
+
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		err = bcrypt.CompareHashAndPassword(
+			[]byte(hashedPassword),
+			[]byte(user.Password),
+		)
+		if err != nil {
+			http.Error(w, "Inavlid username or password", http.StatusUnauthorized)
+			return
+		}
+		token, err := GenerateToken(dbUsername)
+
+		if err != nil {
+			http.Error(w, "Could not create token", http.StatusInternalServerError)
+			return
+		}
+
+		fmt.Fprintln(w, token)
 	}
 }

@@ -1,24 +1,17 @@
-const registerForm = document.getElementById("registerForm");
+const loginForm = document.getElementById("loginForm");
 const message = document.getElementById("message");
 
-registerForm.addEventListener("submit", async function (event) {
+loginForm.addEventListener("submit", async function (event) {
     event.preventDefault();
 
     const username = document.getElementById("username").value.trim();
     const password = document.getElementById("password").value;
-    const confirmPassword = document.getElementById("confirmPassword").value;
-
-    if (password !== confirmPassword) {
-        message.style.color = "#f43f5e";
-        message.textContent = "Passwords do not match";
-        return;
-    }
 
     message.style.color = "#94a3b8";
-    message.textContent = "Creating your account...";
+    message.textContent = "Authenticating...";
 
     try {
-        const response = await fetch("/register", {
+        const response = await fetch("/login", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -32,15 +25,16 @@ registerForm.addEventListener("submit", async function (event) {
         const result = await response.text();
 
         if (response.ok) {
+            localStorage.setItem("token", result.trim());
+            localStorage.setItem("instaGo_username", username);
             message.style.color = "#10b981";
-            message.textContent = "Account created successfully! Redirecting to login...";
-            registerForm.reset();
+            message.textContent = "Login successful! Launching chat...";
             setTimeout(() => {
-                window.location.href = "login.html";
-            }, 1200);
+                window.location.href = "/";
+            }, 800);
         } else {
             message.style.color = "#f43f5e";
-            message.textContent = result || "Registration failed";
+            message.textContent = result || "Invalid username or password";
         }
 
     } catch (error) {

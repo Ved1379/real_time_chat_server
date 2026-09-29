@@ -42,6 +42,7 @@ func main() {
 
 	http.HandleFunc("/ws", handleWebSocket)
 	http.Handle("/register", authentication.RegisterHandler(db))
+	http.Handle("/login", authentication.LoginHandler(db))
 	http.Handle("/", http.FileServer(http.Dir("./frontend")))
 
 	fmt.Println("Server is running on port 8080")

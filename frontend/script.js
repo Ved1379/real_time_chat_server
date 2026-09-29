@@ -1,429 +1,1072 @@
-let socket;
+/**
+ * InstaGo Real-time Reactive Chat Engine
+ * High-performance WebSocket messenger with reactive state management.
+ */
 
-let currentUsername = "";
+// ==========================================================================
+// REACTIVE APP STATE
+// ==========================================================================
+const state = {
+    socket: null,
+    currentUser: localStorage.getItem("instaGo_username") || "",
+    activeRecipient: localStorage.getItem("instaGo_activeRecipient") || "",
+    connectionStatus: "disconnected", // "disconnected" | "connecting" | "connected" | "reconnecting"
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    contacts: JSON.parse(localStorage.getItem("instaGo_contacts") || "[]"),
+    messages: {}, // { [username]: [ { id, from, to, message, timestamp, isMine, status } ] }
+    soundEnabled: localStorage.getItem("instaGo_sound") !== "false",
+    isUserDrawerOpen: false,
+    searchContactTerm: "",
+    searchMessageTerm: "",
+    isScrolledUp: false,
+    unreadWhileScrolled: 0,
+    audioCtx: null
+};
 
+// ==========================================================================
+// AUDIO SYNTHESIS (Zero External Asset Dependency)
+// ==========================================================================
+function getAudioContext() {
+    if (!state.audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+            state.audioCtx = new AudioContext();
+        }
+    }
+    if (state.audioCtx && state.audioCtx.state === "suspended") {
+        state.audioCtx.resume();
+    }
+    return state.audioCtx;
+}
 
-// =========================
-// CONNECT
-// =========================
+function playSound(type) {
+    if (!state.soundEnabled) return;
+    try {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+
+        if (type === "send") {
+            // Gentle high pop
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(580, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+            gain.gain.setValueAtTime(0.12, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+            osc.start(now);
+            osc.stop(now + 0.08);
+        } else if (type === "receive") {
+            // Pleasant double chime
+            osc.type = "sine";
+            osc.frequency.setValueAtTime(523.25, now); // C5
+            osc.frequency.setValueAtTime(659.25, now + 0.06); // E5
+            gain.gain.setValueAtTime(0.14, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+            osc.start(now);
+            osc.stop(now + 0.16);
+        } else if (type === "notify") {
+            // Soft alert tone
+            osc.type = "triangle";
+            osc.frequency.setValueAtTime(440, now);
+            gain.gain.setValueAtTime(0.1, now);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        }
+    } catch (e) {
+        console.warn("Audio playback disabled or blocked by browser:", e);
+    }
+}
+
+// ==========================================================================
+// COLOR & AVATAR GENERATION
+// ==========================================================================
+function getAvatarGradient(name) {
+    if (!name) return "linear-gradient(135deg, #64748b, #475569)";
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h1 = Math.abs(hash % 360);
+    const h2 = (h1 + 45) % 360;
+    return `linear-gradient(135deg, hsl(${h1}, 75%, 55%), hsl(${h2}, 85%, 60%))`;
+}
+
+function getInitials(name) {
+    if (!name) return "?";
+    return name.slice(0, 2).toUpperCase();
+}
+
+// ==========================================================================
+// DATE & TIME FORMATTERS
+// ==========================================================================
+function formatTime(dateObj) {
+    const d = new Date(dateObj);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatRelativeTime(dateObj) {
+    const d = new Date(dateObj);
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
+    const diffSec = Math.floor((now - d) / 1000);
+
+    if (diffSec < 60) return "Just now";
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return formatTime(d);
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function formatDateHeader(dateObj) {
+    const d = new Date(dateObj);
+    if (isNaN(d.getTime())) return "Today";
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (d.toDateString() === now.toDateString()) {
+        return "Today";
+    }
+    if (d.toDateString() === yesterday.toDateString()) {
+        return "Yesterday";
+    }
+    return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+}
+
+// ==========================================================================
+// TOAST NOTIFICATIONS
+// ==========================================================================
+function showToast(message, type = "info") {
+    const container = document.getElementById("toastContainer");
+    if (!container) return;
+
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+
+    let icon = "ℹ️";
+    if (type === "success") icon = "✅";
+    if (type === "warning") icon = "⚠️";
+    if (type === "error") icon = "❌";
+
+    toast.innerHTML = `<span>${icon}</span><span>${escapeHtml(message)}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateX(20px)";
+        setTimeout(() => toast.remove(), 250);
+    }, 3500);
+}
+
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+// ==========================================================================
+// WEBSOCKET LIFECYCLE & AUTO-RECONNECT
+// ==========================================================================
+function getWebSocketUrl(username) {
+    const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+    const host = window.location.host || "localhost:8080";
+    return `${protocol}${host}/ws?username=${encodeURIComponent(username)}`;
+}
+
+function setConnectionStatus(status) {
+    state.connectionStatus = status;
+
+    const statusDot = document.getElementById("myStatusDot");
+    const statusText = document.getElementById("myStatusText");
+    const connectButton = document.getElementById("connectButton");
+    const headerStatus = document.getElementById("connectionStatus");
+    const myAvatar = document.getElementById("myAvatar");
+
+    if (!statusDot || !statusText || !connectButton || !headerStatus) return;
+
+    statusDot.className = "live-dot";
+    myAvatar.className = "user-avatar status-indicator";
+    headerStatus.className = "header-status-badge";
+
+    if (status === "connected") {
+        statusDot.classList.add("online");
+        myAvatar.classList.add("online");
+        headerStatus.classList.add("online");
+        statusText.innerText = "Online";
+        headerStatus.innerText = "Connected";
+        connectButton.innerText = "Disconnect";
+        connectButton.className = "btn-secondary";
+        state.reconnectAttempts = 0;
+    } else if (status === "connecting" || status === "reconnecting") {
+        statusDot.classList.add("connecting");
+        myAvatar.classList.add("connecting");
+        headerStatus.classList.add("connecting");
+        statusText.innerText = status === "connecting" ? "Connecting..." : "Reconnecting...";
+        headerStatus.innerText = statusText.innerText;
+        connectButton.innerText = "Connecting...";
+        connectButton.className = "btn-secondary";
+    } else {
+        statusText.innerText = "Offline";
+        headerStatus.innerText = "Offline";
+        connectButton.innerText = "Connect";
+        connectButton.className = "btn-primary";
+    }
+}
 
 function connect() {
-
-    const username =
-        document.getElementById("username")
-            .value
-            .trim();
-
+    const input = document.getElementById("username");
+    const username = (input ? input.value : state.currentUser).trim();
 
     if (!username) {
-
-        alert("Please enter a username");
-
+        showToast("Please enter a username to connect", "warning");
+        if (input) input.focus();
         return;
     }
 
+    state.currentUser = username;
+    localStorage.setItem("instaGo_username", username);
+    updateProfileUI();
 
-    currentUsername = username;
+    if (state.socket && (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)) {
+        state.socket.close();
+    }
 
+    setConnectionStatus("connecting");
 
-    socket = new WebSocket(
-        "ws://localhost:8080/ws?username=" +
-        encodeURIComponent(username)
-    );
+    const wsUrl = getWebSocketUrl(username);
 
+    try {
+        state.socket = new WebSocket(wsUrl);
+    } catch (e) {
+        console.error("WebSocket init error:", e);
+        setConnectionStatus("disconnected");
+        showToast("Could not open WebSocket connection", "error");
+        return;
+    }
 
-    // =========================
-    // CONNECTION OPEN
-    // =========================
+    state.socket.onopen = function () {
+        setConnectionStatus("connected");
+        showToast(`Connected as ${username}`, "success");
+        playSound("notify");
 
-    socket.onopen = function() {
+        // Hide connect drawer if open
+        toggleUserDrawer(false);
 
-        document.getElementById("status")
-            .innerText = "Online";
-
-
-        document.getElementById("connectionStatus")
-            .innerText = "Connected";
-
-
-        document.getElementById("statusDot")
-            .classList.add("online");
-
-
-        document.getElementById("connectButton")
-            .innerText = "Connected";
-
-    };
-
-
-    // =========================
-    // RECEIVE MESSAGE
-    // =========================
-
-    socket.onmessage = function(event) {
-
-        const output =
-            document.getElementById("output");
-
-
-        try {
-
-            const data =
-                JSON.parse(event.data);
-
-
-            // =========================
-            // CHAT HISTORY
-            // =========================
-
-            if (Array.isArray(data)) {
-
-                output.innerHTML = "";
-
-
-                data.forEach(function(msg) {
-
-                    addMessage(
-                        msg.from,
-                        msg.message,
-                        msg.from === currentUsername
-                    );
-
-                });
-
-            }
-
-
-            // =========================
-            // JSON OBJECT
-            // =========================
-
-            else {
-
-                output.innerHTML +=
-                    "<div class='message'>" +
-
-                    "<div class='message-text'>" +
-                    event.data +
-                    "</div>" +
-
-                    "</div>";
-
-            }
-
+        // If there's an active recipient, request chat history
+        if (state.activeRecipient) {
+            requestHistory(state.activeRecipient);
         }
+    };
 
+    state.socket.onmessage = function (event) {
+        handleIncomingMessage(event.data);
+    };
 
-        // =========================
-        // NORMAL TEXT MESSAGE
-        // =========================
+    state.socket.onclose = function (event) {
+        setConnectionStatus("disconnected");
 
-        catch (error) {
-
-            output.innerHTML +=
-                "<div class='message'>" +
-
-                "<div class='message-text'>" +
-                event.data +
-                "</div>" +
-
-                "</div>";
-
+        // Attempt reconnection if disconnected unintentionally and username exists
+        if (state.currentUser && !event.wasClean && state.reconnectAttempts < 5) {
+            state.reconnectAttempts++;
+            const timeout = Math.min(3000 * state.reconnectAttempts, 10000);
+            setConnectionStatus("reconnecting");
+            clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = setTimeout(() => {
+                connect();
+            }, timeout);
         }
-
-
-        output.scrollTop =
-            output.scrollHeight;
-
     };
 
-
-    // =========================
-    // CONNECTION CLOSED
-    // =========================
-
-    socket.onclose = function() {
-
-        document.getElementById("status")
-            .innerText = "Offline";
-
-
-        document.getElementById("connectionStatus")
-            .innerText = "Disconnected";
-
-
-        document.getElementById("statusDot")
-            .classList.remove("online");
-
-
-        document.getElementById("connectButton")
-            .innerText = "Connect";
-
+    state.socket.onerror = function (error) {
+        console.warn("WebSocket error:", error);
+        setConnectionStatus("disconnected");
     };
-
-
-    // =========================
-    // ERROR
-    // =========================
-
-    socket.onerror = function(error) {
-
-        console.log(
-            "WebSocket error:",
-            error
-        );
-
-    };
-
 }
 
+function disconnect() {
+    clearTimeout(state.reconnectTimer);
+    state.reconnectAttempts = 99; // prevent auto-reconnect
+    if (state.socket) {
+        state.socket.close();
+    }
+    setConnectionStatus("disconnected");
+    showToast("Disconnected from chat server", "info");
+}
 
-// =========================
-// SEND MESSAGE
-// =========================
+function toggleConnect() {
+    if (state.connectionStatus === "connected") {
+        disconnect();
+    } else {
+        connect();
+    }
+}
 
+// ==========================================================================
+// MESSAGE PROCESSING & DISPATCH
+// ==========================================================================
+function handleIncomingMessage(rawData) {
+    if (!rawData) return;
+
+    try {
+        const parsed = JSON.parse(rawData);
+
+        // CASE 1: Chat History Array
+        if (Array.isArray(parsed)) {
+            handleHistoryResponse(parsed);
+            return;
+        }
+    } catch (e) {
+        // Not a JSON object/array - process as raw text
+    }
+
+    // CASE 2: System notification: "User <username> is not connected"
+    const offlineMatch = rawData.match(/^User\s+(.+)\s+is not connected$/i);
+    if (offlineMatch) {
+        const offlineUser = offlineMatch[1].trim();
+        showToast(`User "${offlineUser}" is currently offline`, "warning");
+        appendSystemMessage(`User ${offlineUser} is not connected right now. They'll see your message when they connect.`);
+        return;
+    }
+
+    // CASE 3: Normal chat message: "sender: message"
+    const colonIndex = rawData.indexOf(":");
+    if (colonIndex > 0) {
+        const sender = rawData.slice(0, colonIndex).trim();
+        const content = rawData.slice(colonIndex + 1).trim();
+
+        processReceivedChatMessage(sender, content);
+        return;
+    }
+
+    // Fallback unformatted message
+    appendSystemMessage(rawData);
+}
+
+function processReceivedChatMessage(sender, content) {
+    const isMine = sender === state.currentUser;
+    const chatPartner = isMine ? state.activeRecipient : sender;
+
+    if (!chatPartner) return;
+
+    const messageObj = {
+        id: "msg_" + Date.now() + "_" + Math.random().toString(36).substr(2, 4),
+        from: sender,
+        to: isMine ? state.activeRecipient : state.currentUser,
+        message: content,
+        timestamp: new Date().toISOString(),
+        isMine: isMine,
+        status: "received"
+    };
+
+    // Store in message cache
+    if (!state.messages[chatPartner]) {
+        state.messages[chatPartner] = [];
+    }
+    state.messages[chatPartner].push(messageObj);
+
+    // Update contacts list
+    updateContactSummary(chatPartner, content, new Date().toISOString(), !isMine && chatPartner !== state.activeRecipient);
+
+    // Render if currently viewing this conversation
+    if (chatPartner === state.activeRecipient) {
+        renderSingleMessage(messageObj);
+        playSound("receive");
+
+        if (state.isScrolledUp) {
+            state.unreadWhileScrolled++;
+            updateScrollButton();
+        } else {
+            scrollToBottom(false);
+        }
+    } else {
+        // Notification for background conversation
+        playSound("notify");
+        showToast(`New message from ${sender}`, "info");
+    }
+}
+
+function handleHistoryResponse(historyArray) {
+    if (!state.activeRecipient) return;
+
+    // Transform into standard format
+    const formattedMessages = historyArray.map(item => ({
+        id: "hist_" + (item.id || Date.now() + Math.random()),
+        from: item.from,
+        to: item.to,
+        message: item.message,
+        timestamp: item.created_at || new Date().toISOString(),
+        isMine: item.from === state.currentUser,
+        status: "delivered"
+    }));
+
+    state.messages[state.activeRecipient] = formattedMessages;
+
+    // Update last message in contact list
+    if (formattedMessages.length > 0) {
+        const last = formattedMessages[formattedMessages.length - 1];
+        updateContactSummary(state.activeRecipient, last.message, last.timestamp, false);
+    }
+
+    renderCurrentConversation();
+    scrollToBottom(false);
+}
+
+function appendSystemMessage(text, type = "info") {
+    const output = document.getElementById("output");
+    if (!output) return;
+
+    const eventEl = document.createElement("div");
+    eventEl.className = `system-event ${type}`;
+    eventEl.innerHTML = `<span>ℹ️</span> <span>${escapeHtml(text)}</span>`;
+    output.appendChild(eventEl);
+    scrollToBottom(false);
+}
+
+// ==========================================================================
+// SENDING MESSAGES
+// ==========================================================================
 function sendMessage() {
+    const messageInput = document.getElementById("message");
+    if (!messageInput) return;
 
-    const recipient =
-        document.getElementById("recipient")
-            .value
-            .trim();
+    const text = messageInput.value.trim();
+    if (!text) return;
 
-
-    const messageInput =
-        document.getElementById("message");
-
-
-    const message =
-        messageInput
-            .value
-            .trim();
-
-
-    if (!socket ||
-        socket.readyState !== WebSocket.OPEN) {
-
-        alert("Connect first!");
-
+    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
+        showToast("Please connect to the server first", "warning");
+        toggleUserDrawer(true);
         return;
     }
 
-
-    if (!recipient || !message) {
-
+    if (!state.activeRecipient) {
+        showToast("Select or enter a recipient to chat with", "warning");
+        const recipientInput = document.getElementById("recipient");
+        if (recipientInput) recipientInput.focus();
         return;
     }
 
-
-    const data = {
-
+    const payload = {
         type: "message",
-
-        to: recipient,
-
-        message: message
-
+        to: state.activeRecipient,
+        message: text
     };
 
+    // Optimistic UI addition
+    const optimisticMsg = {
+        id: "msg_" + Date.now(),
+        from: state.currentUser,
+        to: state.activeRecipient,
+        message: text,
+        timestamp: new Date().toISOString(),
+        isMine: true,
+        status: "sent"
+    };
 
-    socket.send(
-        JSON.stringify(data)
-    );
+    if (!state.messages[state.activeRecipient]) {
+        state.messages[state.activeRecipient] = [];
+    }
+    state.messages[state.activeRecipient].push(optimisticMsg);
 
+    // Update contacts list summary
+    updateContactSummary(state.activeRecipient, `You: ${text}`, optimisticMsg.timestamp, false);
 
-    // Show the message on sender's side
+    // Send payload through WebSocket
+    state.socket.send(JSON.stringify(payload));
 
-    addMessage(
-        currentUsername,
-        message,
-        true,
-        "✓ Sent"
-    );
+    // Render immediately & play sound
+    renderSingleMessage(optimisticMsg);
+    playSound("send");
+    scrollToBottom(true);
 
-
+    // Reset input
     messageInput.value = "";
-
+    handleTextareaInput({ target: messageInput });
 }
 
-
-// =========================
-// GET CHAT HISTORY
-// =========================
-
-function getHistory() {
-
-    const recipient =
-        document.getElementById("recipient")
-            .value
-            .trim();
-
-
-    if (!socket ||
-        socket.readyState !== WebSocket.OPEN) {
-
-        alert("Connect first!");
-
+function sendQuickReaction(emoji) {
+    if (!state.activeRecipient) {
+        showToast("Select a conversation to send reaction", "info");
         return;
     }
-
-
-    if (!recipient) {
-
-        return;
-    }
-
-
-    // Update chat header
-
-    document.getElementById("chatTitle")
-        .innerText =
-        "Chat with " + recipient;
-
-
-    document.getElementById("chatSubtitle")
-        .innerText =
-        "Conversation history";
-
-
-    // Request history
-
-    const data = {
-
-        type: "history",
-
-        to: recipient
-
-    };
-
-
-    socket.send(
-        JSON.stringify(data)
-    );
-
-}
-
-
-// =========================
-// RECIPIENT ENTER
-// =========================
-
-function handleRecipient(event) {
-
-    if (event.key === "Enter") {
-
-        getHistory();
-
-    }
-
-}
-
-
-// =========================
-// ADD MESSAGE
-// =========================
-
-function addMessage(
-    username,
-    message,
-    mine = false,
-    status = ""
-) {
-
-    const output =
-        document.getElementById("output");
-
-
-    // Remove welcome screen
-
-    const welcome =
-        output.querySelector(".welcome");
-
-
-    if (welcome) {
-
-        welcome.remove();
-
-    }
-
-
-    const div =
-        document.createElement("div");
-
-
-    div.className =
-        "message" +
-        (mine ? " mine" : "");
-
-
-    const name =
-        document.createElement("div");
-
-
-    name.className =
-        "message-name";
-
-
-    name.innerText =
-        username;
-
-
-    const text =
-        document.createElement("div");
-
-
-    text.className =
-        "message-text";
-
-
-    text.innerText =
-        message;
-
-
-    div.appendChild(name);
-
-    div.appendChild(text);
-
-
-    // Add status for sender
-
-    if (status) {
-
-        const statusElement =
-            document.createElement("div");
-
-
-        statusElement.className =
-            "message-status";
-
-
-        statusElement.innerText =
-            status;
-
-
-        div.appendChild(statusElement);
-
-    }
-
-
-    output.appendChild(div);
-
-
-    output.scrollTop =
-        output.scrollHeight;
-
-}
-
-
-// =========================
-// ENTER TO SEND
-// =========================
-
-function handleEnter(event) {
-
-    if (event.key === "Enter") {
-
+    const messageInput = document.getElementById("message");
+    if (messageInput) {
+        messageInput.value = emoji;
         sendMessage();
+    }
+}
 
+function requestHistory(recipient) {
+    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
+    if (!recipient) return;
+
+    const payload = {
+        type: "history",
+        to: recipient
+    };
+    state.socket.send(JSON.stringify(payload));
+}
+
+function refreshHistory() {
+    if (!state.activeRecipient) {
+        showToast("Select a conversation first", "info");
+        return;
+    }
+    showToast(`Refreshing history with ${state.activeRecipient}...`, "info");
+    requestHistory(state.activeRecipient);
+}
+
+// ==========================================================================
+// CONTACTS MANAGEMENT & SIDEBAR
+// ==========================================================================
+function updateContactSummary(username, lastMessage, timestamp, incrementUnread = false) {
+    if (!username || username === state.currentUser) return;
+
+    let contact = state.contacts.find(c => c.username.toLowerCase() === username.toLowerCase());
+
+    if (!contact) {
+        contact = {
+            username: username,
+            lastMessage: lastMessage || "Started conversation",
+            timestamp: timestamp || new Date().toISOString(),
+            unread: incrementUnread ? 1 : 0
+        };
+        state.contacts.unshift(contact);
+    } else {
+        contact.lastMessage = lastMessage || contact.lastMessage;
+        contact.timestamp = timestamp || new Date().toISOString();
+        if (incrementUnread) {
+            contact.unread = (contact.unread || 0) + 1;
+        }
+        // Move to top of list
+        state.contacts = [contact, ...state.contacts.filter(c => c !== contact)];
     }
 
+    saveContacts();
+    renderContactsList();
 }
+
+function saveContacts() {
+    localStorage.setItem("instaGo_contacts", JSON.stringify(state.contacts));
+}
+
+function renderContactsList() {
+    const listEl = document.getElementById("conversationList");
+    const countEl = document.getElementById("contactsCount");
+    if (!listEl) return;
+
+    const query = state.searchContactTerm.toLowerCase().trim();
+    const filtered = state.contacts.filter(c => c.username.toLowerCase().includes(query));
+
+    if (countEl) {
+        countEl.innerText = state.contacts.length;
+    }
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = `
+            <div class="sidebar-empty-state">
+                <div class="sidebar-empty-icon">💬</div>
+                <div>${query ? "No chats found" : "No active chats yet"}</div>
+                <div style="font-size: 11px;">${query ? "Try a different search term" : "Start a chat using the input below"}</div>
+            </div>
+        `;
+        return;
+    }
+
+    listEl.innerHTML = "";
+
+    filtered.forEach(contact => {
+        const isActive = contact.username.toLowerCase() === state.activeRecipient.toLowerCase();
+        const unreadCount = contact.unread || 0;
+
+        const item = document.createElement("div");
+        item.className = `conversation-item ${isActive ? "active" : ""} ${unreadCount > 0 ? "unread" : ""}`;
+        item.setAttribute("role", "listitem");
+        item.onclick = () => selectContact(contact.username);
+
+        item.innerHTML = `
+            <div class="contact-avatar" style="background: ${getAvatarGradient(contact.username)}">
+                ${getInitials(contact.username)}
+            </div>
+            <div class="contact-info">
+                <div class="contact-top-row">
+                    <span class="contact-name">${escapeHtml(contact.username)}</span>
+                    <span class="contact-time">${formatRelativeTime(contact.timestamp)}</span>
+                </div>
+                <div class="contact-bottom-row">
+                    <span class="contact-snippet">${escapeHtml(contact.lastMessage || "No messages")}</span>
+                    ${unreadCount > 0 ? `<span class="unread-badge">${unreadCount}</span>` : ""}
+                    <button class="item-delete-btn" onclick="deleteContact(event, '${escapeHtml(contact.username)}')" title="Remove chat">✕</button>
+                </div>
+            </div>
+        `;
+
+        listEl.appendChild(item);
+    });
+}
+
+function selectContact(username) {
+    if (!username) return;
+
+    state.activeRecipient = username;
+    localStorage.setItem("instaGo_activeRecipient", username);
+
+    // Reset unread count for this contact
+    const contact = state.contacts.find(c => c.username.toLowerCase() === username.toLowerCase());
+    if (contact && contact.unread) {
+        contact.unread = 0;
+        saveContacts();
+    }
+
+    updateHeaderUI();
+    renderContactsList();
+
+    // Close mobile sidebar if open
+    toggleMobileSidebar(false);
+
+    // If we have messages cached, render them; otherwise request history
+    if (state.messages[username] && state.messages[username].length > 0) {
+        renderCurrentConversation();
+        scrollToBottom(false);
+    } else {
+        renderEmptyChatLoading();
+    }
+
+    // Always fetch fresh history from backend
+    requestHistory(username);
+}
+
+function deleteContact(event, username) {
+    event.stopPropagation();
+    state.contacts = state.contacts.filter(c => c.username.toLowerCase() !== username.toLowerCase());
+    delete state.messages[username];
+    saveContacts();
+
+    if (state.activeRecipient.toLowerCase() === username.toLowerCase()) {
+        state.activeRecipient = state.contacts.length > 0 ? state.contacts[0].username : "";
+        selectContact(state.activeRecipient);
+    } else {
+        renderContactsList();
+    }
+}
+
+function handleStartChat(event) {
+    if (event) event.preventDefault();
+
+    const input = document.getElementById("recipient");
+    if (!input) return;
+
+    const username = input.value.trim();
+    if (!username) return;
+
+    if (username.toLowerCase() === state.currentUser.toLowerCase()) {
+        showToast("You cannot start a chat with yourself", "warning");
+        return;
+    }
+
+    input.value = "";
+    updateContactSummary(username, "Conversation started", new Date().toISOString(), false);
+    selectContact(username);
+}
+
+function quickSelectUser(name) {
+    updateContactSummary(name, "Conversation started", new Date().toISOString(), false);
+    selectContact(name);
+}
+
+// ==========================================================================
+// RENDERING MESSAGES
+// ==========================================================================
+function renderEmptyChatLoading() {
+    const output = document.getElementById("output");
+    if (!output) return;
+
+    output.innerHTML = `
+        <div class="chat-welcome">
+            <div class="welcome-badge">💬</div>
+            <h2 class="welcome-title">Loading Chat with ${escapeHtml(state.activeRecipient)}</h2>
+            <p class="welcome-desc">Fetching conversation history from database...</p>
+        </div>
+    `;
+}
+
+function renderCurrentConversation() {
+    const output = document.getElementById("output");
+    if (!output) return;
+
+    const list = state.messages[state.activeRecipient] || [];
+
+    if (list.length === 0) {
+        output.innerHTML = `
+            <div class="chat-welcome">
+                <div class="welcome-badge">👋</div>
+                <h2 class="welcome-title">Start the conversation!</h2>
+                <p class="welcome-desc">Say hello to ${escapeHtml(state.activeRecipient)}. Send a friendly message or quick reaction.</p>
+                <div class="welcome-suggestions">
+                    <span class="suggestion-chip" onclick="sendQuickReaction('👋')">Say Hello 👋</span>
+                    <span class="suggestion-chip" onclick="sendQuickReaction('🔥')">Send Fire 🔥</span>
+                    <span class="suggestion-chip" onclick="sendQuickReaction('🚀')">Let's build! 🚀</span>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    output.innerHTML = "";
+
+    // Search query filter
+    const query = state.searchMessageTerm.toLowerCase().trim();
+    let lastDate = "";
+
+    list.forEach(msg => {
+        if (query && !msg.message.toLowerCase().includes(query)) {
+            return;
+        }
+
+        // Date divider
+        const msgDate = formatDateHeader(msg.timestamp);
+        if (msgDate !== lastDate) {
+            lastDate = msgDate;
+            const divider = document.createElement("div");
+            divider.className = "date-divider";
+            divider.innerHTML = `<span class="date-pill">${msgDate}</span>`;
+            output.appendChild(divider);
+        }
+
+        output.appendChild(createMessageElement(msg));
+    });
+}
+
+function renderSingleMessage(msg) {
+    const output = document.getElementById("output");
+    if (!output) return;
+
+    // Remove welcome card if present
+    const welcome = output.querySelector(".chat-welcome");
+    if (welcome) welcome.remove();
+
+    output.appendChild(createMessageElement(msg));
+}
+
+function createMessageElement(msg) {
+    const row = document.createElement("div");
+    row.className = `message-row ${msg.isMine ? "mine" : "theirs"}`;
+    row.id = msg.id;
+
+    const author = msg.from || (msg.isMine ? state.currentUser : state.activeRecipient);
+    const timeStr = formatTime(msg.timestamp);
+
+    row.innerHTML = `
+        <div class="bubble-avatar" style="background: ${getAvatarGradient(author)}">
+            ${getInitials(author)}
+        </div>
+        <div class="message-bubble-wrapper">
+            <div class="message-bubble">
+                <div class="bubble-author">${escapeHtml(author)}</div>
+                <div class="bubble-content">${escapeHtml(msg.message)}</div>
+                <div class="bubble-meta">
+                    <span>${timeStr}</span>
+                    ${msg.isMine ? `<span class="receipt-icon" title="Delivered">✓✓</span>` : ""}
+                </div>
+            </div>
+        </div>
+        <div class="bubble-actions">
+            <button class="bubble-action-btn" onclick="copyMessageText('${escapeHtml(msg.message)}')" title="Copy message">📋</button>
+            <button class="bubble-action-btn" onclick="sendQuickReaction('❤️')" title="Heart">❤️</button>
+            <button class="bubble-action-btn" onclick="sendQuickReaction('👍')" title="Thumbs up">👍</button>
+        </div>
+    `;
+
+    return row;
+}
+
+function copyMessageText(text) {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast("Message copied to clipboard", "success");
+        });
+    }
+}
+
+// ==========================================================================
+// SCROLL MANAGEMENT & STICKY SCROLL
+// ==========================================================================
+function setupScrollListener() {
+    const output = document.getElementById("output");
+    if (!output) return;
+
+    output.addEventListener("scroll", () => {
+        const threshold = 120;
+        const fromBottom = output.scrollHeight - output.scrollTop - output.clientHeight;
+
+        state.isScrolledUp = fromBottom > threshold;
+
+        if (!state.isScrolledUp) {
+            state.unreadWhileScrolled = 0;
+            updateScrollButton();
+        }
+    });
+}
+
+function scrollToBottom(force = false) {
+    const output = document.getElementById("output");
+    if (!output) return;
+
+    if (force || !state.isScrolledUp) {
+        output.scrollTop = output.scrollHeight;
+        state.isScrolledUp = false;
+        state.unreadWhileScrolled = 0;
+        updateScrollButton();
+    }
+}
+
+function updateScrollButton() {
+    const btn = document.getElementById("scrollBottomBtn");
+    const badge = document.getElementById("newMsgBadge");
+    if (!btn || !badge) return;
+
+    if (state.isScrolledUp) {
+        btn.classList.add("visible");
+        if (state.unreadWhileScrolled > 0) {
+            badge.style.display = "block";
+            badge.innerText = state.unreadWhileScrolled;
+        } else {
+            badge.style.display = "none";
+        }
+    } else {
+        btn.classList.remove("visible");
+        badge.style.display = "none";
+    }
+}
+
+// ==========================================================================
+// INPUT CONTROLS & EVENT HANDLERS
+// ==========================================================================
+function handleTextareaKeydown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+    }
+}
+
+function handleTextareaInput(event) {
+    const textarea = event.target;
+    const sendBtn = document.getElementById("sendBtn");
+    const charCounter = document.getElementById("charCounter");
+
+    // Auto grow textarea
+    textarea.style.height = "auto";
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + "px";
+
+    const length = textarea.value.length;
+    if (charCounter) {
+        charCounter.innerText = `${length} / 2000`;
+    }
+
+    if (sendBtn) {
+        sendBtn.disabled = length === 0;
+    }
+}
+
+function toggleEmojiPicker() {
+    const popover = document.getElementById("emojiPopover");
+    if (!popover) return;
+    popover.classList.toggle("open");
+}
+
+function insertEmoji(emoji) {
+    const textarea = document.getElementById("message");
+    if (!textarea) return;
+
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || 0;
+    const text = textarea.value;
+
+    textarea.value = text.substring(0, start) + emoji + text.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+    textarea.focus();
+
+    handleTextareaInput({ target: textarea });
+    toggleEmojiPicker();
+}
+
+function initEmojiGrid() {
+    const grid = document.getElementById("emojiGrid");
+    if (!grid) return;
+
+    const emojis = [
+        "😀", "😂", "🤣", "😊", "😍", "🤩", "😎",
+        "🥳", "😏", "🥺", "😭", "😤", "🤯", "🥶",
+        "👍", "👎", "👏", "🙌", "🤝", "🙏", "✌️",
+        "🔥", "✨", "💯", "🎉", "🚀", "❤️", "💜",
+        "💡", "⚡", "🌟", "💬", "👀", "🫡", "☕"
+    ];
+
+    grid.innerHTML = "";
+    emojis.forEach(emoji => {
+        const cell = document.createElement("button");
+        cell.className = "emoji-cell";
+        cell.type = "button";
+        cell.innerText = emoji;
+        cell.onclick = () => insertEmoji(emoji);
+        grid.appendChild(cell);
+    });
+
+    // Close emoji popover on outside click
+    document.addEventListener("click", e => {
+        const popover = document.getElementById("emojiPopover");
+        const trigger = document.getElementById("emojiTriggerBtn");
+        if (popover && popover.classList.contains("open")) {
+            if (!popover.contains(e.target) && !trigger.contains(e.target)) {
+                popover.classList.remove("open");
+            }
+        }
+    });
+}
+
+function toggleSound() {
+    state.soundEnabled = !state.soundEnabled;
+    localStorage.setItem("instaGo_sound", state.soundEnabled ? "true" : "false");
+    const btn = document.getElementById("soundToggleBtn");
+    if (btn) {
+        btn.innerText = state.soundEnabled ? "🔊" : "🔇";
+        btn.title = `Sound Effects (${state.soundEnabled ? "On" : "Off"})`;
+    }
+    showToast(`Sound ${state.soundEnabled ? "Enabled" : "Muted"}`, "info");
+}
+
+function toggleUserDrawer(force) {
+    const drawer = document.getElementById("userConnectDrawer");
+    if (!drawer) return;
+
+    const shouldOpen = force !== undefined ? force : drawer.style.display !== "flex";
+    drawer.style.display = shouldOpen ? "flex" : "none";
+}
+
+function toggleMobileSidebar(open) {
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.getElementById("sidebarOverlay");
+    if (!sidebar || !overlay) return;
+
+    if (open) {
+        sidebar.classList.add("open");
+        overlay.classList.add("active");
+    } else {
+        sidebar.classList.remove("open");
+        overlay.classList.remove("active");
+    }
+}
+
+function toggleChatSearch(force) {
+    const drawer = document.getElementById("chatSearchDrawer");
+    const input = document.getElementById("searchMessagesInput");
+    if (!drawer) return;
+
+    const shouldOpen = force !== undefined ? force : !drawer.classList.contains("open");
+    if (shouldOpen) {
+        drawer.classList.add("open");
+        if (input) input.focus();
+    } else {
+        drawer.classList.remove("open");
+        if (input) input.value = "";
+        state.searchMessageTerm = "";
+        renderCurrentConversation();
+    }
+}
+
+function handleSearchContacts(event) {
+    state.searchContactTerm = event.target.value;
+    renderContactsList();
+}
+
+function handleSearchMessages(event) {
+    state.searchMessageTerm = event.target.value;
+    renderCurrentConversation();
+}
+
+// ==========================================================================
+// UI STATE UPDATES
+// ==========================================================================
+function updateProfileUI() {
+    const nameEl = document.getElementById("myUsername");
+    const avatarEl = document.getElementById("myAvatar");
+    const input = document.getElementById("username");
+
+    if (nameEl) {
+        nameEl.innerText = state.currentUser || "Guest";
+    }
+    if (avatarEl) {
+        avatarEl.innerText = getInitials(state.currentUser);
+        avatarEl.style.background = getAvatarGradient(state.currentUser);
+    }
+    if (input && state.currentUser) {
+        input.value = state.currentUser;
+    }
+}
+
+function updateHeaderUI() {
+    const title = document.getElementById("chatTitle");
+    const subtitle = document.getElementById("chatSubtitle");
+    const avatar = document.getElementById("activeAvatar");
+
+    if (!title || !subtitle || !avatar) return;
+
+    if (state.activeRecipient) {
+        title.innerText = state.activeRecipient;
+        subtitle.innerText = "Real-time conversation history";
+        avatar.innerText = getInitials(state.activeRecipient);
+        avatar.style.background = getAvatarGradient(state.activeRecipient);
+    } else {
+        title.innerText = "Welcome to InstaGo";
+        subtitle.innerText = "Select or start a conversation from the sidebar";
+        avatar.innerText = "💬";
+        avatar.style.background = "var(--accent-gradient)";
+    }
+}
+
+// ==========================================================================
+// INITIALIZATION
+// ==========================================================================
+document.addEventListener("DOMContentLoaded", () => {
+    // Populate username from localStorage or default
+    updateProfileUI();
+    updateHeaderUI();
+    renderContactsList();
+    initEmojiGrid();
+    setupScrollListener();
+
+    // Check sound setting
+    const soundBtn = document.getElementById("soundToggleBtn");
+    if (soundBtn) {
+        soundBtn.innerText = state.soundEnabled ? "🔊" : "🔇";
+    }
+
+    // Auto-connect if username is available
+    if (state.currentUser) {
+        connect();
+    } else {
+        toggleUserDrawer(true);
+    }
+
+    // Select active recipient if stored
+    if (state.activeRecipient) {
+        selectContact(state.activeRecipient);
+    }
+
+    // Disable send button initially if empty
+    const textarea = document.getElementById("message");
+    if (textarea) {
+        handleTextareaInput({ target: textarea });
+    }
+});
