@@ -35,8 +35,8 @@
                 </a>
 
                 <div class="sidebar-actions">
-                    <button class="icon-btn" onclick="logout()" title="Sign Out">
-                        🚪
+                    <button class="icon-btn" onclick="startNewChatDialog()" title="Start New Chat">
+                        +
                     </button>
                 </div>
             </header>
@@ -61,7 +61,6 @@
 
                     <button id="logoutBtn" class="logout-btn" onclick="logout()" title="Sign Out">
                         <span>Sign Out</span>
-                        <span>🚪</span>
                     </button>
                 </div>
             </section>
@@ -77,6 +76,7 @@
                         placeholder="Search chats..."
                         autocomplete="off"
                         oninput="handleSearchContacts(event)"
+                        onkeydown="handleSearchKeydown(event)"
                     >
                 </div>
             </div>
@@ -91,24 +91,6 @@
             <div id="conversationList" class="conversation-list" role="list">
                 <!-- Rendered dynamically by script.js -->
             </div>
-
-            <!-- SIDEBAR FOOTER (START NEW CHAT) -->
-            <footer class="sidebar-footer">
-                <form class="new-chat-form" onsubmit="handleStartChat(event)">
-                    <input
-                        type="text"
-                        id="recipient"
-                        class="new-chat-input"
-                        placeholder="Chat with username..."
-                        autocomplete="off"
-                        required
-                    >
-
-                    <button type="submit" class="btn-primary" title="Start conversation">
-                        +
-                    </button>
-                </form>
-            </footer>
 
         </aside>
 
@@ -177,15 +159,15 @@
             <section id="output" class="messages-viewport" role="log" aria-live="polite">
 
                 <div class="chat-welcome">
-                    <div class="welcome-badge">🚀</div>
-                    <h2 class="welcome-title">Instant Real-Time Chat</h2>
+                    <div class="welcome-badge">💬</div>
+                    <h2 class="welcome-title">InstaGo Messenger</h2>
                     <p class="welcome-desc">
-                        Connect with your friends, team members, or collaborate with anyone in real-time with sub-millisecond response.
+                        Select a conversation from the sidebar or click '+' to start a new chat.
                     </p>
                     <div class="welcome-suggestions">
-                        <span class="suggestion-chip" onclick="quickSelectUser('alice')">💬 Chat with Alice</span>
-                        <span class="suggestion-chip" onclick="quickSelectUser('bob')">💬 Chat with Bob</span>
-                        <span class="suggestion-chip" onclick="quickSelectUser('charlie')">💬 Chat with Charlie</span>
+                        <button class="btn-primary" onclick="startNewChatDialog()" style="padding: 8px 16px; font-size: 13px;">
+                            + Start New Chat
+                        </button>
                     </div>
                 </div>
 

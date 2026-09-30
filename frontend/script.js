@@ -88,15 +88,27 @@ function playSound(type) {
 // ==========================================================================
 // COLOR & AVATAR GENERATION
 // ==========================================================================
+const AVATAR_PALETTE = [
+    "#2563eb", // blue
+    "#0d9488", // teal
+    "#7c3aed", // violet
+    "#d97706", // amber
+    "#059669", // emerald
+    "#e11d48", // rose
+    "#4f46e5", // indigo
+    "#0284c7", // sky
+    "#9333ea", // purple
+    "#475569"  // slate
+];
+
 function getAvatarGradient(name) {
-    if (!name) return "linear-gradient(135deg, #64748b, #475569)";
+    if (!name) return "#475569";
     let hash = 0;
     for (let i = 0; i < name.length; i++) {
         hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
-    const h1 = Math.abs(hash % 360);
-    const h2 = (h1 + 45) % 360;
-    return `linear-gradient(135deg, hsl(${h1}, 75%, 55%), hsl(${h2}, 85%, 60%))`;
+    const idx = Math.abs(hash) % AVATAR_PALETTE.length;
+    return AVATAR_PALETTE[idx];
 }
 
 function getInitials(name) {
@@ -266,6 +278,16 @@ function connect() {
         showToast(`Connected as ${username}`, "success");
         playSound("notify");
 
+        // Send JWT authentication over the WebSocket
+        const jwtToken = (localStorage.getItem("token") || "").trim();
+        if (jwtToken) {
+            state.socket.send(JSON.stringify({
+                type: "auth",
+                token: jwtToken,
+                username: username
+            }));
+        }
+
         if (typeof toggleUserDrawer === "function") {
             toggleUserDrawer(false);
         }
@@ -354,7 +376,15 @@ function handleIncomingMessage(rawData) {
         // Not a JSON object/array - process as raw text
     }
 
-    // CASE 2: System notification: "User <username> is not connected"
+    // CASE 2: System notification: "User <username> is not connected" or "does not exist"
+    const notExistMatch = rawData.match(/^User\s+(.+)\s+does not exist$/i);
+    if (notExistMatch) {
+        const missingUser = notExistMatch[1].trim();
+        showToast(`User "${missingUser}" does not exist`, "error");
+        appendSystemMessage(`User "${missingUser}" does not exist in the database.`, "error");
+        return;
+    }
+
     const offlineMatch = rawData.match(/^User\s+(.+)\s+is not connected$/i);
     if (offlineMatch) {
         const offlineUser = offlineMatch[1].trim();
@@ -474,14 +504,15 @@ function sendMessage() {
     }
 
     if (!state.activeRecipient) {
-        showToast("Select or enter a recipient to chat with", "warning");
-        const recipientInput = document.getElementById("recipient");
-        if (recipientInput) recipientInput.focus();
+        showToast("Select a conversation from the sidebar to chat", "warning");
+        focusSearch();
         return;
     }
 
+    const jwtToken = (localStorage.getItem("token") || "").trim();
     const payload = {
         type: "message",
+        token: jwtToken,
         to: state.activeRecipient,
         message: text
     };
@@ -534,8 +565,10 @@ function requestHistory(recipient) {
     if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
     if (!recipient) return;
 
+    const jwtToken = (localStorage.getItem("token") || "").trim();
     const payload = {
         type: "history",
+        token: jwtToken,
         to: recipient
     };
     state.socket.send(JSON.stringify(payload));
@@ -601,7 +634,7 @@ function renderContactsList() {
             <div class="sidebar-empty-state">
                 <div class="sidebar-empty-icon">💬</div>
                 <div>${query ? "No chats found" : "No active chats yet"}</div>
-                <div style="font-size: 11px;">${query ? "Try a different search term" : "Start a chat using the input below"}</div>
+                <div style="font-size: 11px;">${query ? `No chats match "${escapeHtml(query)}"` : "Click '+' above to start a conversation"}</div>
             </div>
         `;
         return;
@@ -640,7 +673,14 @@ function renderContactsList() {
 }
 
 function selectContact(username) {
-    if (!username) return;
+    if (!username) {
+        state.activeRecipient = "";
+        localStorage.removeItem("instaGo_activeRecipient");
+        updateHeaderUI();
+        renderContactsList();
+        renderEmptyState();
+        return;
+    }
 
     state.activeRecipient = username;
     localStorage.setItem("instaGo_activeRecipient", username);
@@ -670,6 +710,25 @@ function selectContact(username) {
     requestHistory(username);
 }
 
+function renderEmptyState() {
+    const output = document.getElementById("output");
+    if (!output) return;
+    output.innerHTML = `
+        <div class="chat-welcome">
+            <div class="welcome-badge">💬</div>
+            <h2 class="welcome-title">InstaGo Messenger</h2>
+            <p class="welcome-desc">
+                Select a conversation from the sidebar or click '+' to start a new chat.
+            </p>
+            <div class="welcome-suggestions">
+                <button class="btn-primary" onclick="startNewChatDialog()" style="padding: 8px 16px; font-size: 13px;">
+                    + Start New Chat
+                </button>
+            </div>
+        </div>
+    `;
+}
+
 function deleteContact(event, username) {
     event.stopPropagation();
     state.contacts = state.contacts.filter(c => c.username.toLowerCase() !== username.toLowerCase());
@@ -684,13 +743,32 @@ function deleteContact(event, username) {
     }
 }
 
-function handleStartChat(event) {
-    if (event) event.preventDefault();
+function focusSearch() {
+    const input = document.getElementById("searchContactsInput");
+    if (input) {
+        input.focus();
+        input.select();
+    }
+}
 
-    const input = document.getElementById("recipient");
-    if (!input) return;
+function handleSearchKeydown(event) {
+    if (event.key === "Enter") {
+        event.preventDefault();
+        const query = state.searchContactTerm.toLowerCase().trim();
+        if (!query) return;
 
-    const username = input.value.trim();
+        const filtered = state.contacts.filter(c => c.username.toLowerCase().includes(query));
+        if (filtered.length > 0) {
+            selectContact(filtered[0].username);
+        }
+    }
+}
+
+async function startNewChatDialog() {
+    const rawUsername = prompt("Enter the username to chat with:");
+    if (!rawUsername) return;
+
+    const username = rawUsername.trim();
     if (!username) return;
 
     if (username.toLowerCase() === state.currentUser.toLowerCase()) {
@@ -698,14 +776,68 @@ function handleStartChat(event) {
         return;
     }
 
-    input.value = "";
-    updateContactSummary(username, "Conversation started", new Date().toISOString(), false);
-    selectContact(username);
+    // Check if conversation already exists in contacts
+    const existing = state.contacts.find(c => c.username.toLowerCase() === username.toLowerCase());
+    if (existing) {
+        selectContact(existing.username);
+        return;
+    }
+
+    // Verify user exists in database before creating any chat!
+    showToast(`Checking if @${username} exists...`, "info");
+
+    try {
+        const response = await fetch(`/check-user?username=${encodeURIComponent(username)}`);
+        if (response.ok) {
+            const data = await response.json();
+            const verifiedUsername = data.username || username;
+            updateContactSummary(verifiedUsername, "Conversation started", new Date().toISOString(), false);
+            selectContact(verifiedUsername);
+            showToast(`Started conversation with @${verifiedUsername}`, "success");
+        } else if (response.status === 404) {
+            showToast(`User "${username}" does not exist. No chat created.`, "error");
+        } else {
+            showToast(`Could not verify user "${username}"`, "error");
+        }
+    } catch (e) {
+        console.error("User check error:", e);
+        showToast("Could not verify username with server", "error");
+    }
 }
 
-function quickSelectUser(name) {
-    updateContactSummary(name, "Conversation started", new Date().toISOString(), false);
-    selectContact(name);
+async function quickSelectUser(name) {
+    if (!name) return;
+    const cleanName = name.trim();
+    if (cleanName.toLowerCase() === state.currentUser.toLowerCase()) {
+        showToast("You cannot start a chat with yourself", "warning");
+        return;
+    }
+
+    const existing = state.contacts.find(c => c.username.toLowerCase() === cleanName.toLowerCase());
+    if (existing) {
+        selectContact(existing.username);
+        return;
+    }
+
+    try {
+        const response = await fetch(`/check-user?username=${encodeURIComponent(cleanName)}`);
+        if (response.ok) {
+            const data = await response.json();
+            const verified = data.username || cleanName;
+            updateContactSummary(verified, "Conversation started", new Date().toISOString(), false);
+            selectContact(verified);
+        } else {
+            showToast(`User "${cleanName}" does not exist`, "error");
+        }
+    } catch (e) {
+        console.error("User check error:", e);
+        showToast("Could not verify user with server", "error");
+    }
+}
+
+function handleStartChat(event) {
+    if (event) event.preventDefault();
+    startNewChatDialog();
 }
 
 // ==========================================================================
@@ -733,13 +865,13 @@ function renderCurrentConversation() {
     if (list.length === 0) {
         output.innerHTML = `
             <div class="chat-welcome">
-                <div class="welcome-badge">👋</div>
-                <h2 class="welcome-title">Start the conversation!</h2>
-                <p class="welcome-desc">Say hello to ${escapeHtml(state.activeRecipient)}. Send a friendly message or quick reaction.</p>
+                <div class="welcome-badge">💬</div>
+                <h2 class="welcome-title">No messages yet</h2>
+                <p class="welcome-desc">Say hello to ${escapeHtml(state.activeRecipient)} to start the conversation.</p>
                 <div class="welcome-suggestions">
                     <span class="suggestion-chip" onclick="sendQuickReaction('👋')">Say Hello 👋</span>
-                    <span class="suggestion-chip" onclick="sendQuickReaction('🔥')">Send Fire 🔥</span>
-                    <span class="suggestion-chip" onclick="sendQuickReaction('🚀')">Let's build! 🚀</span>
+                    <span class="suggestion-chip" onclick="sendQuickReaction('👍')">Thumbs up 👍</span>
+                    <span class="suggestion-chip" onclick="sendQuickReaction('Hello!')">Hello!</span>
                 </div>
             </div>
         `;
@@ -1047,10 +1179,10 @@ function updateHeaderUI() {
         avatar.innerText = getInitials(state.activeRecipient);
         avatar.style.background = getAvatarGradient(state.activeRecipient);
     } else {
-        title.innerText = "Welcome to InstaGo";
+        title.innerText = "InstaGo Messenger";
         subtitle.innerText = "Select or start a conversation from the sidebar";
         avatar.innerText = "💬";
-        avatar.style.background = "var(--accent-gradient)";
+        avatar.style.background = "var(--accent)";
     }
 }
 
