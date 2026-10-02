@@ -4,16 +4,49 @@
  */
 
 // ==========================================================================
-// REACTIVE APP STATE
+// REACTIVE APP STATE & USER ISOLATED STORAGE
 // ==========================================================================
+
+// Purge legacy global keys that bleed contacts and active recipient across accounts
+try {
+    localStorage.removeItem("instaGo_contacts");
+    localStorage.removeItem("instaGo_activeRecipient");
+} catch (e) {}
+
+function getContactsStorageKey(user) {
+    const u = (user || (typeof state !== "undefined" && state.currentUser) || localStorage.getItem("instaGo_username") || "").toLowerCase().trim();
+    return u ? `instaGo_contacts_${u}` : "instaGo_contacts";
+}
+
+function getActiveRecipientStorageKey(user) {
+    const u = (user || (typeof state !== "undefined" && state.currentUser) || localStorage.getItem("instaGo_username") || "").toLowerCase().trim();
+    return u ? `instaGo_activeRecipient_${u}` : "instaGo_activeRecipient";
+}
+
+function loadStoredContactsForUser(user) {
+    if (!user) return [];
+    try {
+        const raw = localStorage.getItem(`instaGo_contacts_${user.toLowerCase().trim()}`);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+            return parsed.filter(c => c && c.username && c.username.toLowerCase() !== user.toLowerCase().trim());
+        }
+    } catch (e) {}
+    return [];
+}
+
+const initialUser = (localStorage.getItem("instaGo_username") || "").trim();
+const initialUserKey = initialUser.toLowerCase();
+
 const state = {
     socket: null,
-    currentUser: localStorage.getItem("instaGo_username") || "",
-    activeRecipient: localStorage.getItem("instaGo_activeRecipient") || "",
+    currentUser: initialUser,
+    activeRecipient: initialUser ? (localStorage.getItem(`instaGo_activeRecipient_${initialUserKey}`) || "") : "",
     connectionStatus: "disconnected", // "disconnected" | "connecting" | "connected" | "reconnecting"
     reconnectAttempts: 0,
     reconnectTimer: null,
-    contacts: JSON.parse(localStorage.getItem("instaGo_contacts") || "[]"),
+    contacts: loadStoredContactsForUser(initialUser),
     messages: {}, // { [username]: [ { id, from, to, message, timestamp, isMine, status } ] }
     soundEnabled: localStorage.getItem("instaGo_sound") !== "false",
     isUserDrawerOpen: false,
@@ -340,9 +373,18 @@ function logout() {
         if (state.socket) {
             state.socket.close();
         }
-        localStorage.removeItem("token");
-        localStorage.removeItem("instaGo_username");
-        localStorage.removeItem("instaGo_activeRecipient");
+        const user = (state.currentUser || "").toLowerCase().trim();
+        if (user) {
+            try {
+                localStorage.removeItem(`instaGo_activeRecipient_${user}`);
+            } catch (e) {}
+        }
+        try {
+            localStorage.removeItem("token");
+            localStorage.removeItem("instaGo_username");
+            localStorage.removeItem("instaGo_activeRecipient");
+            localStorage.removeItem("instaGo_contacts");
+        } catch (e) {}
         showToast("Signed out successfully", "info");
         setTimeout(() => {
             window.location.href = "login.html";
@@ -364,10 +406,25 @@ function toggleConnect() {
 function handleIncomingMessage(rawData) {
     if (!rawData) return;
 
+    // Check for "null" string literal returned by server when history is empty
+    if (rawData === "null" || rawData.trim() === "null") {
+        if (state.activeRecipient) {
+            handleHistoryResponse([]);
+        }
+        return;
+    }
+
     try {
         const parsed = JSON.parse(rawData);
 
-        // CASE 1: Chat History Array
+        // CASE 1: Chat History Array (or null)
+        if (parsed === null) {
+            if (state.activeRecipient) {
+                handleHistoryResponse([]);
+            }
+            return;
+        }
+
         if (Array.isArray(parsed)) {
             handleHistoryResponse(parsed);
             return;
@@ -403,8 +460,10 @@ function handleIncomingMessage(rawData) {
         return;
     }
 
-    // Fallback unformatted message
-    appendSystemMessage(rawData);
+    // Fallback unformatted message - do not append literal "null"
+    if (rawData && rawData !== "null" && rawData.trim() !== "null") {
+        appendSystemMessage(rawData);
+    }
 }
 
 function processReceivedChatMessage(sender, content) {
@@ -453,14 +512,16 @@ function processReceivedChatMessage(sender, content) {
 function handleHistoryResponse(historyArray) {
     if (!state.activeRecipient) return;
 
+    const list = Array.isArray(historyArray) ? historyArray : [];
+
     // Transform into standard format
-    const formattedMessages = historyArray.map(item => ({
+    const formattedMessages = list.map(item => ({
         id: "hist_" + (item.id || Date.now() + Math.random()),
         from: item.from,
         to: item.to,
         message: item.message,
         timestamp: item.created_at || new Date().toISOString(),
-        isMine: item.from === state.currentUser,
+        isMine: (item.from || "").toLowerCase() === (state.currentUser || "").toLowerCase(),
         status: "delivered"
     }));
 
@@ -587,7 +648,7 @@ function refreshHistory() {
 // CONTACTS MANAGEMENT & SIDEBAR
 // ==========================================================================
 function updateContactSummary(username, lastMessage, timestamp, incrementUnread = false) {
-    if (!username || username === state.currentUser) return;
+    if (!username || !state.currentUser || username.toLowerCase() === state.currentUser.toLowerCase()) return;
 
     let contact = state.contacts.find(c => c.username.toLowerCase() === username.toLowerCase());
 
@@ -614,7 +675,58 @@ function updateContactSummary(username, lastMessage, timestamp, incrementUnread 
 }
 
 function saveContacts() {
-    localStorage.setItem("instaGo_contacts", JSON.stringify(state.contacts));
+    if (!state.currentUser) return;
+    state.contacts = state.contacts.filter(c => c && c.username && c.username.toLowerCase() !== state.currentUser.toLowerCase());
+    localStorage.setItem(getContactsStorageKey(), JSON.stringify(state.contacts));
+}
+
+async function loadRecentConversations() {
+    const token = localStorage.getItem("token");
+    if (!token || !state.currentUser) return;
+
+    try {
+        const response = await fetch(`/conversations?token=${encodeURIComponent(token)}`);
+        if (response.ok) {
+            const dbConversations = await response.json();
+            if (Array.isArray(dbConversations)) {
+                const map = new Map();
+                // 1. Add conversations loaded from database
+                dbConversations.forEach(item => {
+                    if (item && item.username && item.username.toLowerCase() !== state.currentUser.toLowerCase()) {
+                        map.set(item.username.toLowerCase(), {
+                            username: item.username,
+                            lastMessage: item.lastMessage || "Started conversation",
+                            timestamp: item.timestamp || new Date().toISOString(),
+                            unread: 0
+                        });
+                    }
+                });
+
+                // 2. Preserve any local contacts for this user that haven't exchanged messages yet
+                state.contacts.forEach(c => {
+                    if (c && c.username && c.username.toLowerCase() !== state.currentUser.toLowerCase()) {
+                        if (!map.has(c.username.toLowerCase())) {
+                            map.set(c.username.toLowerCase(), c);
+                        }
+                    }
+                });
+
+                state.contacts = Array.from(map.values());
+                saveContacts();
+                renderContactsList();
+
+                // If active recipient is not in contacts or not valid, clear it
+                if (state.activeRecipient) {
+                    const exists = state.contacts.some(c => c.username.toLowerCase() === state.activeRecipient.toLowerCase());
+                    if (!exists) {
+                        selectContact("");
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Could not load conversations from server:", e);
+    }
 }
 
 function renderContactsList() {
@@ -675,7 +787,9 @@ function renderContactsList() {
 function selectContact(username) {
     if (!username) {
         state.activeRecipient = "";
-        localStorage.removeItem("instaGo_activeRecipient");
+        if (state.currentUser) {
+            localStorage.removeItem(getActiveRecipientStorageKey());
+        }
         updateHeaderUI();
         renderContactsList();
         renderEmptyState();
@@ -683,7 +797,9 @@ function selectContact(username) {
     }
 
     state.activeRecipient = username;
-    localStorage.setItem("instaGo_activeRecipient", username);
+    if (state.currentUser) {
+        localStorage.setItem(getActiveRecipientStorageKey(), username);
+    }
 
     // Reset unread count for this contact
     const contact = state.contacts.find(c => c.username.toLowerCase() === username.toLowerCase());
@@ -1192,7 +1308,7 @@ function updateHeaderUI() {
 document.addEventListener("DOMContentLoaded", () => {
     // 1. Auth Guard check: Ensure user is registered & logged in
     const token = localStorage.getItem("token");
-    const username = localStorage.getItem("instaGo_username");
+    const username = (localStorage.getItem("instaGo_username") || "").trim();
 
     if (!token || !username) {
         window.location.replace("register.html");
@@ -1200,6 +1316,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     state.currentUser = username;
+
+    // Load contacts strictly for this authenticated user
+    state.contacts = loadStoredContactsForUser(username);
+    saveContacts();
 
     // 2. Initialize UI
     updateProfileUI();
@@ -1217,9 +1337,16 @@ document.addEventListener("DOMContentLoaded", () => {
     // Automatically connect with authenticated session
     connect();
 
-    // Select active recipient if stored
-    if (state.activeRecipient) {
-        selectContact(state.activeRecipient);
+    // Load persistent conversations from database
+    loadRecentConversations();
+
+    // Only select active recipient if stored AND validly present in contacts
+    const userRecipientKey = getActiveRecipientStorageKey(username);
+    const storedActive = localStorage.getItem(userRecipientKey) || "";
+    if (storedActive && state.contacts.some(c => c.username.toLowerCase() === storedActive.toLowerCase())) {
+        selectContact(storedActive);
+    } else {
+        selectContact("");
     }
 
     // Disable send button initially if empty

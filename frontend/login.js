@@ -69,8 +69,24 @@ loginForm.addEventListener("submit", async function (event) {
         const result = await response.text();
 
         if (response.ok) {
+            const previousUser = localStorage.getItem("instaGo_username");
+            const newUser = username.trim();
+
+            // Clear legacy global un-scoped keys that leak across users
+            try {
+                localStorage.removeItem("instaGo_contacts");
+                localStorage.removeItem("instaGo_activeRecipient");
+            } catch (e) {}
+
+            // If switching to a different user, clear recipient state
+            if (previousUser && previousUser.toLowerCase() !== newUser.toLowerCase()) {
+                try {
+                    localStorage.removeItem(`instaGo_activeRecipient_${previousUser.toLowerCase()}`);
+                } catch (e) {}
+            }
+
             localStorage.setItem("token", result.trim());
-            localStorage.setItem("instaGo_username", username);
+            localStorage.setItem("instaGo_username", newUser);
             message.style.color = "#10b981";
             message.textContent = "Login successful! Launching chat...";
 

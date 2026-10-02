@@ -64,6 +64,14 @@ registerForm.addEventListener("submit", async function (event) {
         const result = await response.text();
 
         if (response.ok) {
+            // Clear any previous user's session data to avoid cross-account bleeding
+            try {
+                localStorage.removeItem("token");
+                localStorage.removeItem("instaGo_username");
+                localStorage.removeItem("instaGo_activeRecipient");
+                localStorage.removeItem("instaGo_contacts");
+            } catch (e) {}
+
             message.style.color = "#10b981";
             message.textContent = "Account registered successfully! Redirecting to Step 2 (Login)...";
             registerForm.reset();

@@ -36,7 +36,8 @@ var db *sql.DB
 
 var upgrade = gorilla.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+		return origin == "http://localhost:8080"
 	},
 }
 
@@ -48,6 +49,7 @@ func main() {
 
 	http.HandleFunc("/ws", handleWebSocket)
 	http.HandleFunc("/check-user", handleCheckUser)
+	http.HandleFunc("/conversations", handleConversations)
 	http.Handle("/register", authentication.RegisterHandler(db))
 	http.Handle("/login", authentication.LoginHandler(db))
 	http.Handle("/", http.FileServer(http.Dir("./frontend")))
@@ -59,19 +61,19 @@ func main() {
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	username := ""
+
 	tokenString := r.URL.Query().Get("token")
+
 	if tokenString != "" {
 		claims, err := authentication.ValidateToken(tokenString)
+
 		if err == nil && claims.Username != "" {
 			username = claims.Username
 		}
 	}
-	if username == "" {
-		username = r.URL.Query().Get("username")
-	}
 
 	if username == "" {
-		http.Error(w, "Unauthorized: username or token required", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized: valid token required", http.StatusUnauthorized)
 		return
 	}
 
@@ -98,7 +100,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	for {
 
-		messageType, message, err := conn.ReadMessage()
+		_, message, err := conn.ReadMessage()
 
 		if err != nil {
 			fmt.Println("Disconnected", err)
@@ -116,30 +118,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		switch ChatMessage.Type {
 
-		case "auth":
-			if ChatMessage.Token != "" {
-				claims, err := authentication.ValidateToken(ChatMessage.Token)
-				if err == nil && claims.Username != "" {
-					client.Username = claims.Username
-					fmt.Printf("Authenticated client '%s' via WebSocket JWT payload\n", client.Username)
-				} else {
-					fmt.Println("Invalid WebSocket auth token:", err)
-				}
-			}
-
 		case "message":
-			if ChatMessage.Token != "" {
-				claims, err := authentication.ValidateToken(ChatMessage.Token)
-				if err == nil && claims.Username != "" {
-					client.Username = claims.Username
-				}
-			}
-
-			ChatMessage.From = client.Username
-
-			// Verify recipient exists in users table before routing or saving
+				ChatMessage.From = client.Username
 			var recipientExists bool
-			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(username) = LOWER($1))", ChatMessage.To).Scan(&recipientExists)
+			err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE LOWER(username) = LOWER($1))", ChatMessage.To).Scan(&recipientExists)
 			if err != nil || !recipientExists {
 				_ = client.Conn.WriteMessage(
 					gorilla.TextMessage,
@@ -161,50 +143,49 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			response := []byte(client.Username + ": " + ChatMessage.Message)
 
-			found := false
+			var recipients []*websocket.Client
 
 			hub.Mu.Lock()
-
 			for recipient := range hub.Clients {
 				if recipient.Username == ChatMessage.To {
-					found = true
-
-					err := recipient.Conn.WriteMessage(
-						messageType,
-						response,
-					)
-
-					if err != nil {
-						fmt.Println("Error sending message:", err)
-					}
+					recipients = append(recipients, recipient)
 				}
 			}
-
 			hub.Mu.Unlock()
+
+			found := len(recipients) > 0
+
+			for _, recipient := range recipients {
+				err := recipient.Conn.WriteMessage(gorilla.TextMessage, response)
+				if err != nil {
+					fmt.Println("Error sending message:", err)
+				}
+			}
 
 			if !found {
 				err := client.Conn.WriteMessage(
 					gorilla.TextMessage,
 					[]byte("User "+ChatMessage.To+" is not connected"),
 				)
-
 				if err != nil {
 					fmt.Println("Error sending notification:", err)
 				}
 			}
 
 		case "history":
-			if ChatMessage.Token != "" {
-				claims, err := authentication.ValidateToken(ChatMessage.Token)
-				if err == nil && claims.Username != "" {
-					client.Username = claims.Username
-				}
-			}
-			history, err := database.GetChatHistory(db, client.Username, ChatMessage.To)
+			history, err := database.GetChatHistory(
+				db,
+				client.Username,
+				ChatMessage.To,
+			)
 
 			if err != nil {
 				fmt.Println("Error getting chat history:", err)
 				return
+			}
+
+			if history == nil {
+				history = []database.Message{}
 			}
 
 			historyJSON, err := json.Marshal(history)
@@ -226,6 +207,41 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+}
+
+func handleConversations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	tokenString := r.URL.Query().Get("token")
+	if tokenString == "" {
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if tokenString == "" {
+		http.Error(w, "Unauthorized: valid token required", http.StatusUnauthorized)
+		return
+	}
+
+	claims, err := authentication.ValidateToken(tokenString)
+	if err != nil || claims.Username == "" {
+		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	conversations, err := database.GetRecentConversations(db, claims.Username)
+	if err != nil {
+		http.Error(w, "Failed to retrieve conversations: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(conversations)
 }
 
 func handleCheckUser(w http.ResponseWriter, r *http.Request) {
@@ -257,3 +273,4 @@ func handleCheckUser(w http.ResponseWriter, r *http.Request) {
 		"username": dbUsername,
 	})
 }
+

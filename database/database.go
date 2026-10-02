@@ -145,13 +145,19 @@ func GetUserByUsername(db *sql.DB, username string) (string, string, error) {
 
 }
 
+type ConversationSummary struct {
+	Username    string    `json:"username"`
+	LastMessage string    `json:"lastMessage"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
 func GetChatHistory(db *sql.DB, username1, username2 string) ([]Message, error) {
 
 	query := `
 		SELECT from_user, to_user, message, created_at
 		FROM messages
-		WHERE (from_user = $1 AND to_user = $2)
-		   OR (from_user = $2 AND to_user = $1)
+		WHERE (LOWER(from_user) = LOWER($1) AND LOWER(to_user) = LOWER($2))
+		   OR (LOWER(from_user) = LOWER($2) AND LOWER(to_user) = LOWER($1))
 		ORDER BY created_at ASC
 	`
 
@@ -163,7 +169,7 @@ func GetChatHistory(db *sql.DB, username1, username2 string) ([]Message, error) 
 
 	defer rows.Close()
 
-	var history []Message
+	history := make([]Message, 0)
 
 	for rows.Next() {
 
@@ -189,3 +195,59 @@ func GetChatHistory(db *sql.DB, username1, username2 string) ([]Message, error) 
 
 	return history, nil
 }
+
+func GetRecentConversations(db *sql.DB, username string) ([]ConversationSummary, error) {
+	query := `
+		SELECT 
+			COALESCE(u.username, ranked.partner) AS username,
+			ranked.message,
+			ranked.created_at
+		FROM (
+			SELECT 
+				CASE 
+					WHEN LOWER(from_user) = LOWER($1) THEN to_user 
+					ELSE from_user 
+				END AS partner,
+				message,
+				created_at,
+				ROW_NUMBER() OVER (
+					PARTITION BY (
+						CASE 
+							WHEN LOWER(from_user) = LOWER($1) THEN LOWER(to_user) 
+							ELSE LOWER(from_user) 
+						END
+					) 
+					ORDER BY created_at DESC
+				) AS rn
+			FROM messages
+			WHERE LOWER(from_user) = LOWER($1) OR LOWER(to_user) = LOWER($1)
+		) ranked
+		LEFT JOIN users u ON LOWER(u.username) = LOWER(ranked.partner)
+		WHERE ranked.rn = 1
+		ORDER BY ranked.created_at DESC;
+	`
+
+	rows, err := db.Query(query, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	conversations := make([]ConversationSummary, 0)
+
+	for rows.Next() {
+		var c ConversationSummary
+		err := rows.Scan(&c.Username, &c.LastMessage, &c.Timestamp)
+		if err != nil {
+			return nil, err
+		}
+		conversations = append(conversations, c)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return conversations, nil
+}
+
